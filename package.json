@@ -1,0 +1,21 @@
+{
+  "name": "dikiy-parser",
+  "version": "1.0.0",
+  "description": "Дикий парсер для генерации моделей ts через swagger",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Kirill Urazmanov",
+  "license": "ISC",
+  "dependencies": {
+    "@types/lodash.kebabcase": "^4.1.6",
+    "@types/node": "^14.0.11",
+    "lodash.kebabcase": "^4.1.1",
+    "prettier": "^2.0.5",
+    "typescript": "^3.9.5"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.4"
+  }
+}
