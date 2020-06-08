@@ -43,53 +43,43 @@ export class DikiyParser {
       return '';
     }
     const deps: string[] = [];
-    const dtoName = def.title;
+    const imports: string[] = [];
+    const dtoName = this.matchDtoName(def.title);
     let data = `export interface ${dtoName}  {\r\n`;
     Object.entries<any>(def.properties).forEach(([propName, propValue]) => {
-      const { type } = propValue;
-
-      if (type == TYPES.string) {
-        data += `  ${propName}: ${TYPES.string};`;
-      } else if (type == TYPES.integer || type === TYPES.number) {
-        data += `  ${propName}: ${TYPES.number};`;
-      } else if (type == TYPES.boolean) {
-        data += `  ${propName}: ${TYPES.boolean};`;
-      } else if (type == TYPES.object) {
-        data += `  ${propName}: ${this.createObjectAdditionalData(propValue, data, deps)};`;
-      } else if (type == TYPES.array) {
-        data += `  ${propName}: any[];`;
-      } else if (type === undefined && typeof propValue.$ref === 'string') {
-        const dtoName = propValue.$ref.replace('#/definitions/', '');
-        if (!deps.includes(propValue.$ref)) {
-          data = `import { ${dtoName} } from "./${kebabCase(dtoName)}";\r\n${data}`;
-          deps.push(propValue.$ref);
-        }
-        data += `  ${propName}: ${dtoName}`;
-      } else {
-        console.log(propName, propValue);
-      }
-
+      data += `  ${propName}: ${this.createProp(propValue, deps, imports)}`;
       data += '\r\n';
     });
+    imports.forEach(i => (data = `${i}${data}`));
     return data + '}';
   }
 
-  private createProp(){
-    let data
-  }
-
-  private createObjectAdditionalData(propValue: { [k: string]: any }, deps: string[] = []): string {
-    let data = '';
-    if (propValue.additionalProperties) {
-      const { type } = propValue.additionalProperties;
-      if (type === TYPES.string) {
-        data += `{ [k: string]: ${TYPES.string} }`;
-      } else if (TYPES.integer || type === TYPES.number) {
-        data += `{ [k: string]: ${TYPES.number} }`;
+  private createProp(propValue: { [k: string]: any }, deps: string[], imports: string[]) {
+    let prop = '';
+    const { type } = propValue;
+    if (type == TYPES.string) {
+      prop += `${TYPES.string};`;
+    } else if (type === TYPES.integer || type === TYPES.number) {
+      prop += `${TYPES.number};`;
+    } else if (type === TYPES.boolean) {
+      prop += `${TYPES.boolean};`;
+    } else if (type === TYPES.object) {
+      if (propValue.additionalProperties) {
+        prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports)} };`;
       }
+    } else if (type == TYPES.array) {
+      prop += `${this.createProp(propValue.items, deps, imports)}[];`;
+    } else if (type === undefined && typeof propValue.$ref === 'string') {
+      const depDtoName = this.matchDtoName(propValue.$ref);
+      if (!deps.includes(propValue.$ref)) {
+        imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\r\n`);
+        deps.push(propValue.$ref);
+      }
+      prop += `${depDtoName}`;
+    } else {
+      throw new Error('Ошибка парсинга');
     }
-
-    return data;
+    return prop;
   }
 
   private saveFile(dtoName: string, data: string) {
@@ -103,6 +93,14 @@ export class DikiyParser {
         throw new Error(err.message);
       }
     });
+  }
+
+  private matchDtoName(definition: string) {
+    const matches = definition.match(/[^?#\/definitions\/](\w+)/);
+    if (matches !== null) {
+      return matches[0];
+    }
+    throw new Error('Ошибка в партсинге #/definitions');
   }
 }
 
