@@ -1,5 +1,5 @@
 import { get } from 'http';
-import { mkdirSync, existsSync, writeFile } from 'fs';
+import { mkdirSync, existsSync, writeFile, readdir } from 'fs';
 const kebabCase = require('lodash.kebabcase');
 
 const TYPES = {
@@ -24,6 +24,7 @@ export class DikiyParser {
       const fileData = this.createFileData(def);
       this.saveFile(fileName, fileData);
     }
+    this.createIndexFile();
   }
 
   private createSwaggerRequest(): Promise<string> {
@@ -101,6 +102,22 @@ export class DikiyParser {
       return matches[0];
     }
     throw new Error('Ошибка в партсинге #/definitions');
+  }
+
+  private createIndexFile() {
+    const path = `${__dirname}/models/`;
+    readdir(path, (err, files) => {
+      if (err) {
+        throw new Error(err.message);
+      }
+      let data = '';
+      files.forEach(file => (data += `export * from "./${file.replace('.d.ts', '')}"\r\n`));
+      writeFile(`${path}/index.d.ts`, data, err => {
+        if (err) {
+          throw new Error(err.message);
+        }
+      });
+    });
   }
 }
 
