@@ -78,7 +78,7 @@ export class DikiyParser {
         imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\r\n`);
         deps.push(propValue.$ref);
       }
-      prop += `${depDtoName}`;
+      prop += `${depDtoName};`;
     } else {
       throw new Error('Ошибка парсинга');
     }
@@ -101,7 +101,7 @@ export class DikiyParser {
   private matchDtoName(definition: string) {
     const matches = definition.match(/[^?#\/definitions\/](\w+)/);
     if (matches !== null) {
-      return matches[0];
+      return matches[0].trim();
     }
     throw new Error('Ошибка в партсинге #/definitions');
   }
@@ -113,7 +113,7 @@ export class DikiyParser {
         throw new Error(err.message);
       }
       let data = '';
-      files.forEach(file => (data += `export * from "./${file.replace('.d.ts', '')}"\r\n`));
+      files.forEach(file => (data += `export * from "./${file.replace('/^M//g', '').replace('.d.ts', '')}"\r\n`));
       writeFile(`${path}/index.d.ts`, data, err => {
         if (err) {
           throw new Error(err.message);
