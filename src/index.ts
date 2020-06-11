@@ -20,7 +20,7 @@ export class DikiyParser {
     const swaggerResponse = await this.createSwaggerRequest();
     const { definitions } = JSON.parse(JSON.parse(String(swaggerResponse)));
     for (const def of Object.values<any>(definitions)) {
-      const fileName = def.title;
+      const fileName = this.matchDtoName(def.title);
       const fileData = this.createFileData(def);
       this.saveFile(fileName, fileData);
     }
@@ -67,6 +67,8 @@ export class DikiyParser {
     } else if (type === TYPES.object) {
       if (propValue.additionalProperties) {
         prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports)} };`;
+      } else {
+        prop += `{ [k: string]: any };`;
       }
     } else if (type == TYPES.array) {
       prop += `${this.createProp(propValue.items, deps, imports)}[];`;
