@@ -46,43 +46,43 @@ export class DikiyParser {
     const deps: string[] = [];
     const imports: string[] = [];
     const dtoName = this.matchDtoName(def.title);
-    let data = `export interface ${dtoName}  {\r\n`;
+    let data = `export interface ${dtoName}  {\n`;
     Object.entries<any>(def.properties).forEach(([propName, propValue]) => {
       data += `  ${propName}: ${this.createProp(propValue, deps, imports)}`;
-      data += '\r\n';
+      data += '\n';
     });
     imports.forEach(i => (data = `${i}${data}`));
     return data + '}';
   }
 
-  private createProp(propValue: { [k: string]: any }, deps: string[], imports: string[]) {
+  private createProp(propValue: { [k: string]: any }, deps: string[], imports: string[], ending = ';') {
     let prop = '';
     const { type } = propValue;
     if (type == TYPES.string) {
-      prop += `${TYPES.string};`;
+      prop += `${TYPES.string}`;
     } else if (type === TYPES.integer || type === TYPES.number) {
-      prop += `${TYPES.number};`;
+      prop += `${TYPES.number}`;
     } else if (type === TYPES.boolean) {
-      prop += `${TYPES.boolean};`;
+      prop += `${TYPES.boolean}`;
     } else if (type === TYPES.object) {
       if (propValue.additionalProperties) {
-        prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports)} };`;
+        prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports)} }`;
       } else {
-        prop += `{ [k: string]: any };`;
+        prop += `{ [k: string]: any }`;
       }
     } else if (type == TYPES.array) {
-      prop += `${this.createProp(propValue.items, deps, imports)}[];`;
+      prop += `${this.createProp(propValue.items, deps, imports, '[]')}`;
     } else if (type === undefined && typeof propValue.$ref === 'string') {
       const depDtoName = this.matchDtoName(propValue.$ref);
       if (!deps.includes(propValue.$ref)) {
-        imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\r\n`);
+        imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\n`);
         deps.push(propValue.$ref);
       }
-      prop += `${depDtoName};`;
+      prop += `${depDtoName}`;
     } else {
       throw new Error('Ошибка парсинга');
     }
-    return prop;
+    return prop + ending;
   }
 
   private saveFile(dtoName: string, data: string) {
@@ -113,7 +113,7 @@ export class DikiyParser {
         throw new Error(err.message);
       }
       let data = '';
-      files.forEach(file => (data += `export * from "./${file.replace('/^M//g', '').replace('.d.ts', '')}"\r\n`));
+      files.forEach(file => (data += `export * from "./${file.replace('/^M//g', '').replace('.d.ts', '')}"\n`));
       writeFile(`${path}/index.d.ts`, data, err => {
         if (err) {
           throw new Error(err.message);
