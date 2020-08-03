@@ -22,7 +22,10 @@ export class DikiyParser {
     for (const def of Object.values<any>(definitions)) {
       const fileName = this.matchDtoName(def.title);
       const fileData = this.createFileData(def);
-      this.saveFile(fileName, fileData);
+      if(fileName !== null) {
+        this.saveFile(fileName, fileData);
+      }
+     
     }
     this.createIndexFile();
   }
@@ -102,8 +105,10 @@ export class DikiyParser {
     const matches = definition.match(/[^?#\/definitions\/](\w+)/);
     if (matches !== null) {
       return matches[0].trim();
+    } else {
+      console.error('Ошибка в партсинге #/definitions', definition);
+      return null;
     }
-    throw new Error('Ошибка в партсинге #/definitions');
   }
 
   private createIndexFile() {
