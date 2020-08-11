@@ -2,48 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { camelCase, upperFirst } from 'lodash';
 import { request } from 'http';
-
-function getJsonFile(filePath: string): any {
-  const p = path.join(__dirname, filePath);
-  const buffer = fs.readFileSync(p, 'utf8');
-  return JSON.parse(buffer);
-}
-
-const IMPORTS = {
-  dto: '@private-dto',
-  http: '@angular/common/http',
-}
-
-class Imports {
-  imports: Map<string, Set<string>> = new Map<string, Set<string>>();
-
-  add(value: string, from: string) {
-    let set = this.imports.get(from);
-    if (!set) {
-      set = new Set();
-      this.imports.set(from, set);
-    }
-    set?.add(value);
-  }
-
-  get(): string[] {
-    const multipleImports: string[] = []
-    // const importsArray: string[] = [];
-    for (const [from, values] of this.imports.entries()) {
-      const valuesStr = Array.from(values).join(', ');
-      multipleImports.push(`import {${valuesStr}} from ${from};`);
-    }
-    return multipleImports;
-  }
-}
-
-class SetWrapper {
-  set: Set<string> = new Set<string>();
-
-  add(data: string) {
-    this.set.add(data);
-  }
-}
+import { Imports, getType, GType, IMPORTS, SetWrapper } from 'utilsRewrite';
 
 // top and bottom are going to be the same
 // imports and exports
@@ -54,8 +13,6 @@ class GFile {
   imports: Imports = new Imports();
 
   classes: GClass[] = [];
-
-  parts: GPart[] = [];
 
   constructor(name: string) {
     this.name = name;
@@ -74,7 +31,6 @@ class GFile {
 }
 
 class GPart {
-  stringRepresentation = '';
   imports: Imports;
   name: string;
 
@@ -82,106 +38,6 @@ class GPart {
     this.name = name;
     this.imports = imports;
   }
-
-  getImports() {
-    return this.imports;
-  }
-
-  toString() {
-    return this.stringRepresentation;
-  }
-}
-
-const TYPES = {
-  string: 'string',
-  array: 'array',
-  number: 'number',
-  integer: 'integer',
-  boolean: 'boolean',
-  file: 'file',
-  object: 'object',
-}
-
-interface GType {
-  pageable: boolean;
-  type: string;
-  ref: string;
-}
-
-function matchDto(data: any): GType {
-  let dto = '';
-  let pageable = false;
-
-  const ref = data?.$ref;
-  if (ref) {
-    const matches = /^#\/definitions\/(.+)/.exec(ref);
-    if (matches && matches[1]) {
-      dto = matches[1];
-      const pageMatches = /(Page|PaginationResponse)«(.+)»/.exec(dto);
-      if (pageMatches) {
-        dto = pageMatches[2];
-        pageable = true;
-
-        if (dto === undefined) {
-          console.error('Could not convert PAGE');
-        }
-      }
-    } else {
-      console.error('could not parse dtos ref');
-    }
-  }
-
-  return { pageable, type: dto, ref: ref as string };
-}
-
-function getType(value: any, imports: Imports): GType {
-  let gType: GType = { pageable: false, type: '', ref: '' };
-  const type = value?.type as string;
-  if (type) {
-    switch (type) {
-      case TYPES.string:
-      case TYPES.boolean:
-        gType.type = type;
-        break;
-      case TYPES.number:
-      case TYPES.integer:
-        gType.type = TYPES.number;
-        break;
-      case TYPES.file:
-        gType.type = 'FormData';
-        break;
-      case TYPES.array:
-        gType.type = `${getType(value.items, imports).type}[]`;
-        break;
-      case TYPES.object: {
-        const additionalProperties = value?.additionalProperties;
-
-        if (additionalProperties) {
-          gType.type = getType(value.additionalProperties, imports).type;
-        } else {
-        gType.type = type;
-          gType.type = 'any';
-        }
-        break;
-      }
-    }
-  } else if (value?.schema) {
-    gType.type = getType(value.schema, imports).type;
-  }
-
-  if (gType.type !== '') {
-    return gType;
-  } else {
-    gType = matchDto(value);
-
-    if (gType.type === '') {
-      console.error('this type does not exist');
-      console.error(value);
-    } else {
-      imports.add(gType.type, '@private/repository')
-    }
-  }
-  return gType;
 }
 
 class Argument {
@@ -210,22 +66,20 @@ class Argument {
 }
 
 class GMethod extends GPart {
-  arguments: Argument[] = [];
+  httpBody = '';
   returnValue = ''
   returnType = ''
   insideLines: string[] = [];
 
-  httpOptions: string[] = [];
-  queries: string[] = [];
-  httpBody = '';
+  arguments = new SetWrapper();
+  queries = new SetWrapper();
+  httpOptions = new SetWrapper();
 
   constructor(name: string, imports: Imports) {
     super(name, imports);
   }
 
   static newService(data: any, imports: Imports): GMethod {
-    const httpArguments = new SetWrapper();
-    const queries = new SetWrapper();
     const gMethod = new GMethod(data.summary, imports);
 
     // get method arguments
@@ -233,7 +87,7 @@ class GMethod extends GPart {
     if (parameters.length > 0) {
       parameters.forEach(parameter => {
         const arg = gMethod.addArgument(parameter);
-        console.log(arg)
+        console.log(arg.gType.type);
       })
     }
 
@@ -267,17 +121,13 @@ class GMethod extends GPart {
 
   addArgument(data: any) {
     const arg = new Argument(data, this.imports);
-    let type = '';
-    const gType = getType(data.schema, this.imports);
 
     if (arg.in === 'body') {
       // name = 'body';
-      if (gType.pageable) {
-        type = 'any';
+      if (arg.gType.pageable) {
+        arg.gType.type = 'any';
         // type = `PageableRequestBody<${str}>`;
         // pushUniqueValue(this.pluginImports, 'PageableRequestBody');
-      } else {
-        type = gType.type;
       }
       // pushUniqueValue(httpArguments, name);
       // pushUniqueValue(this.pageableImports, type);
@@ -286,10 +136,10 @@ class GMethod extends GPart {
     } else if (arg.in === 'path') {
       // do nothing
     } else if (arg.in === 'query') {
-      const camelcaseName = camelCase(name);
+      const camelcaseName = camelCase(arg.name);
       // possibly need to add conversions for other types
-      const querieArgument = type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
-      this.queries.push(`.set('${name}', ${querieArgument})`);
+      const querieArgument = arg.gType.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
+      this.queries.push(`.set('${arg.name}', ${querieArgument})`);
 
       this.imports.add('HttpParams', IMPORTS.http);
     }
@@ -309,16 +159,9 @@ class GMethod extends GPart {
 
 class GClass extends GPart {
   methods: GMethod[] = [];
-  // fields: GField[];
 
   constructor(name: string, imports: Imports) {
     super(name, imports)
-  }
-
-  addMethod(name: string) {
-    const gMethod = new GMethod(name, this.imports);
-    this.methods.push(gMethod);
-    return gMethod;
   }
 
   addServiceMethod(data: any) {
