@@ -1,5 +1,6 @@
 import { get } from 'http';
 import { mkdirSync, existsSync, writeFile, readdir } from 'fs';
+import { parseAllFiles } from './serviceGenerator';
 const kebabCase = require('lodash.kebabcase');
 
 const TYPES = {
@@ -129,3 +130,4 @@ export class DikiyParser {
 }
 
 new DikiyParser().init().then(console.log).catch(console.error);
+// parseAllFiles();
