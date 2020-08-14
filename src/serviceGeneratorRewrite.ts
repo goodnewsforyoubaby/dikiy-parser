@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { camelCase, upperFirst } from 'lodash';
 import { request } from 'http';
-import { Imports, getType, GType, IMPORTS, SetWrapper } from 'utilsRewrite';
+import { Imports, getProp, GType, IMPORTS, SetWrapper } from 'utilsRewrite';
+import { IControllerMethod } from 'controllerMethodDefinitions';
 
 // top and bottom are going to be the same
 // imports and exports
@@ -12,14 +13,14 @@ class GFile {
   exports: string[] = [];
   imports: Imports = new Imports();
 
-  classes: GClass[] = [];
+  classes: GServiceClass[] = [];
 
   constructor(name: string) {
     this.name = name;
   }
 
-  createClass(name: string): GClass {
-    const gClass = new GClass(name, this.imports);
+  createServiceClass(name: string): GServiceClass {
+    const gClass = new GServiceClass(name, this.imports);
     this.classes.push(gClass);
     return gClass;
   }
@@ -40,32 +41,22 @@ class GPart {
   }
 }
 
-class Argument {
-  name: string;
-  gType: GType;
-  required: boolean;
-  default: string;
-  in: string;
+class GServiceClass extends GPart {
+  methods: GServiceMethod[] = [];
 
-  constructor(value: any, imports: Imports) {
-    this.name = value.name;
-    this.gType = getType(value, imports);
-    this.required = value.required;
-    this.default = value?.default ? value.default : undefined;
-    this.in = value.in;
-
+  constructor(name: string, imports: Imports) {
+    super(name, imports)
   }
 
-  toString(): string {
-    if (this.required) {
-      return `${this.name}: ${this.gType.type}`
-    }
-    return `${this.name}: ${this.gType.type}`
-    // return `${this.name}: ${this.type} = ${this.default}`
+  addServiceMethod(data: IControllerMethod) {
+    const gMethod = new GServiceMethod(data, this.imports);
+    this.methods.push(gMethod);
+    return gMethod;
   }
 }
 
-class GMethod extends GPart {
+
+class GServiceMethod extends GPart {
   httpBody = '';
   returnValue = ''
   returnType = ''
@@ -75,26 +66,23 @@ class GMethod extends GPart {
   queries = new SetWrapper();
   httpOptions = new SetWrapper();
 
-  constructor(name: string, imports: Imports) {
+  constructor(data: IControllerMethod, imports: Imports) {
     super(name, imports);
-  }
-
-  static newService(data: any, imports: Imports): GMethod {
-    const gMethod = new GMethod(data.summary, imports);
 
     // get method arguments
-    const parameters = data?.parameters ? (data.parameters as any[]) : [];
+    // const parameters = data?.parameters ? (data.parameters as any[]) : [];
+    const parameters = data.parameters;
     if (parameters.length > 0) {
       parameters.forEach(parameter => {
-        const arg = gMethod.addArgument(parameter);
-        console.log(arg.gType.type);
+        const gType = getProp({ value: parameter, imports });
+        this.createArgument(gType);
       })
     }
 
     // extract method name
     const matches = /(.+)Using.+$/.exec(data.operationId);
     if (matches && matches[1]) {
-      gMethod.name = matches[1];
+      this.name = matches[1];
     } else {
       console.error('Could not find method name');
     }
@@ -102,54 +90,52 @@ class GMethod extends GPart {
     // get return type
     const schema = data.responses["200"]?.schema;
     if (schema) {
-      const gType = getType(schema, gMethod.imports);
+      const gType = getProp({ value: schema, imports: this.imports });
       if (gType.pageable) {
-        gMethod.returnType = 'any';
+        this.returnType = 'any';
       } else if (schema.format === 'byte') {
-        gMethod.httpOptions.push(`responseType: 'blob'`);
-        gMethod.httpOptions.push(`observe: 'response'`);
-        gMethod.returnType = schema.type as string;
+        this.httpOptions.add(`responseType: 'blob'`);
+        this.httpOptions.add(`observe: 'response'`);
+        this.returnType = schema.type as string;
       } else {
-        gMethod.returnType = gType.type;
+        this.returnType = gType.type;
       }
     } else {
-      gMethod.returnType = 'void';
+      this.returnType = 'void';
     }
-    // console.log(gMethod.returnType);
-    return gMethod;
   }
 
-  addArgument(data: any) {
-    const arg = new Argument(data, this.imports);
-
-    if (arg.in === 'body') {
+  createArgument(gType: GType) {
+    if (gType.in === 'body') {
       // name = 'body';
-      if (arg.gType.pageable) {
-        arg.gType.type = 'any';
+      if (gType.pageable) {
+        gType.type = 'any';
         // type = `PageableRequestBody<${str}>`;
         // pushUniqueValue(this.pluginImports, 'PageableRequestBody');
       }
       // pushUniqueValue(httpArguments, name);
       // pushUniqueValue(this.pageableImports, type);
-    } else if (arg.in === 'formData') {
-      // pushUniqueValue(httpArguments, 'formData');
-    } else if (arg.in === 'path') {
+      this.httpBody = gType.name;
+    } else if (gType.in === 'formData') {
+      this.httpBody = gType.name;
+    } else if (gType.in === 'path') {
       // do nothing
-    } else if (arg.in === 'query') {
-      const camelcaseName = camelCase(arg.name);
+    } else if (gType.in === 'query') {
+      const camelcaseName = camelCase(gType.name);
       // possibly need to add conversions for other types
-      const querieArgument = arg.gType.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
-      this.queries.push(`.set('${arg.name}', ${querieArgument})`);
+      const querieArgument = gType.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
+      this.queries.add(`.set('${gType.name}', ${querieArgument})`);
 
       this.imports.add('HttpParams', IMPORTS.http);
     }
-    this.arguments.push(arg);
-    return arg;
+    const argumentStr = `${gType.name}: ${gType.type}`;
+    this.arguments.add(argumentStr);
+    return argumentStr;
   }
 
   toString(): string {
     return `
-      ${this.name}(${this.arguments.join(', ')}): ${this.returnType} {
+      ${this.name}(${this.arguments.get().join(', ')}): ${this.returnType} {
         ${this.insideLines.join(';\n')}
         return ${this.returnValue};
       }
@@ -157,25 +143,12 @@ class GMethod extends GPart {
   }
 }
 
-class GClass extends GPart {
-  methods: GMethod[] = [];
-
-  constructor(name: string, imports: Imports) {
-    super(name, imports)
-  }
-
-  addServiceMethod(data: any) {
-    const gMethod = GMethod.newService(data, this.imports);
-    this.methods.push(gMethod);
-    return gMethod;
-  }
-}
 
 function generateServices() {
   const controllerMap = new Map<string, GFile>()
   const controllers = getJsonFile('api-docs.json').paths as any;
   for (const [controllerName, controllerInside] of Object.entries<any>(controllers)) {
-    for (const [requestType, requestInside] of Object.entries<any>(controllerInside)) {
+    for (const [requestType, requestInside] of Object.entries<IControllerMethod>(controllerInside)) {
       let file = controllerMap.get(controllerName);
       if (file === undefined) {
         const fileName = camelCase(requestInside.tags[0]);
@@ -183,7 +156,7 @@ function generateServices() {
         controllerMap.set(controllerName, file);
 
         const className = upperFirst(fileName);
-        file.createClass(className);
+        file.createServiceClass(className);
       }
       const gClass = file.classes[0];
 

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { IControllerBase } from 'controllerMethodDefinitions';
 
 const IMPORTS = {
   dto: '@private-dto',
@@ -35,6 +36,10 @@ class SetWrapper {
   add(data: string) {
     this.set.add(data);
   }
+
+  get(): string[] {
+    return Array.from(this.set);
+  }
 }
 
 function getJsonFile(filePath: string): any {
@@ -47,6 +52,10 @@ interface GType {
   pageable: boolean;
   type: string;
   ref: string;
+  name: string;
+  required: boolean;
+  default: string | undefined;
+  in: string;
 }
 
 function matchDto(data: any): GType {
@@ -75,30 +84,44 @@ function matchDto(data: any): GType {
   return { pageable, type: dto, ref: ref as string };
 }
 
-function getType(value: any, imports: Imports): GType {
-  let gType: GType = { pageable: false, type: '', ref: '' };
-  const type = value?.type as string;
-  if (type) {
-    switch (type) {
+function getProp(value: IControllerBase, imports: Imports): GType {
+  // let gType: GType = { 
+  //   pageable: false, 
+  //   type: '', 
+  //   ref: '',
+    // name: value.name,
+    // required: value?.required ? value.required : false,
+    // default: value?.default ? value.default : undefined,
+    // in: value.in,
+  // };
+  const type = '';
+
+  if (value.type) {
+    switch (value.type) {
       case TYPES.string:
       case TYPES.boolean:
-        gType.type = type;
+        type = value.type;
         break;
       case TYPES.number:
       case TYPES.integer:
-        gType.type = TYPES.number;
+        type = TYPES.number;
         break;
       case TYPES.file:
-        gType.type = 'FormData';
+        type = 'FormData';
         break;
       case TYPES.array:
-        gType.type = `${getType(value.items, imports).type}[]`;
+        if (value.items) {
+          type = `${getProp(value.items, imports).type}[]`;
+        } else {
+          throw 'Parsing array: error';
+        }
         break;
       case TYPES.object: {
+        // only schema can have additional properties
         const additionalProperties = value?.additionalProperties;
 
         if (additionalProperties) {
-          gType.type = getType(value.additionalProperties, imports).type;
+          gType.type = getProp(value.additionalProperties, imports).type;
         } else {
           gType.type = type;
           gType.type = 'any';
@@ -107,7 +130,7 @@ function getType(value: any, imports: Imports): GType {
       }
     }
   } else if (value?.schema) {
-    gType.type = getType(value.schema, imports).type;
+    gType.type = getProp(value.schema, imports).type;
   }
 
   if (gType.type !== '') {
@@ -143,6 +166,6 @@ export {
     getJsonFile,
     GType,
     matchDto,
-    getType,
+    getProp,
     TYPES,
 }
