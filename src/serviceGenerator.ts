@@ -9,10 +9,11 @@ import {
   Imports,
   Prop,
   SetWrapper,
-  saveFile,
+  saveFile, prettify,
 } from './utils';
 import { IControllerMethod, IControllerParameter, IControllerSchema } from './ISwagger';
 
+// implement HEADER
 class GPart {
   imports: Imports;
   name: string;
@@ -48,12 +49,13 @@ class GFile {
     const importsStr = this.imports.get().join('\n');
     const classesStr = this.classes.join('\n');
 
-    return `${importsStr}
-    
-    ${classesStr} `
+    return `
+      ${importsStr}
+      ${classesStr}
+    `
   }
   save(directory: string, extension: string) {
-    saveFile(`${this.name}${extension}`, directory, this.toString());
+    saveFile(`${this.name}${extension}`, directory, prettify(this.toString()));
   }
 }
 
@@ -66,7 +68,7 @@ class GServiceClass extends GPart {
     this.name = name
       .split('-')
       .slice(0, -1)
-      .map(word => word[0].toUpperCase() + word.slice(1, word.length))
+      .map(word => upperFirst(word))
       .join('') + 'Service';
 
     this.services.push('private http: HttpClient');
@@ -87,14 +89,14 @@ class GServiceClass extends GPart {
     const methodsStr = this.methods.join('\n');
 
     return `
-@Injectable({
-  providedIn: 'root',
-})
-export class ${this.name} {
-  constructor(${servicesStr}) {}
-  \n${methodsStr}
-}
-`
+      @Injectable({
+        providedIn: 'root',
+      })
+      export class ${this.name} {
+        constructor(${servicesStr}) {}
+        ${methodsStr}
+      }
+    `
    }
 }
 
@@ -106,6 +108,7 @@ class GServiceMethod extends GPart {
 
   arguments: IArgument[] = [];
   queries = new SetWrapper();
+  headers = new SetWrapper();
   httpOptions: string[] = [];
 
   requestType: string;
@@ -134,25 +137,23 @@ class GServiceMethod extends GPart {
   toString() {
     const argumentsStr = this.arguments.map(arg => arg.str).join(', ');
 
-    this.insideLines.push(`const url = \`${createStringLiteralFromUrl(this.requestUrl)}\`;`);
+    this.insideLines.push(`const url = \`${createStringLiteralFromUrl(this.requestUrl)}\``);
 
     if (this.queries.get().length > 0) {
       this.httpOptions.push('params');
-      this.insideLines.push(`const params = new HttpParams()${this.queries.get().join('')};`);
+      this.insideLines.push(`const params = new HttpParams()${this.queries.get().join('')}`);
     }
 
     const optionsStr = this.httpOptions.length > 0 ? `, { ${this.httpOptions.join(', ')} }` : '';
     const httpBodyStr = this.httpBody !== '' ? `, ${this.httpBody}` : '';
-    this.insideLines.push(`return this.http.${this.requestType}<${this.returnType}>(url${httpBodyStr}${optionsStr});`);
+    this.insideLines.push(`return this.http.${this.requestType}<${this.returnType}>(url${httpBodyStr}${optionsStr})`);
 
-    const insideMethod = this.insideLines
-      .map(str => `    ${str}`)
-      .join('\n');
+    const insideLinesStr = this.insideLines.join('\n');
 
-    return `  ${this.name}(${argumentsStr}): Observable<${this.returnType}> {
-${insideMethod}
-  }
-    `;
+    return `
+      ${this.name}(${argumentsStr}): Observable<${this.returnType}> {
+        ${insideLinesStr}}
+      `;
   }
 
   getBody() {
@@ -174,6 +175,11 @@ ${insideMethod}
     if (parameters && parameters.length > 0) {
       parameters.forEach(parameter => {
         const prop = getProp(parameter, { isDto: false, isPageable: false, isArray: false });
+
+        // for names like 'X-User-Uuid', they are not valid in js
+        if (parameter.name.split('-').length > 1) {
+          parameter.name = parameter.name.split('-').join('');
+        }
 
         if (parameter.in === 'formData') {
           if (parameter.required) {
@@ -236,11 +242,12 @@ ${insideMethod}
     return returnType;
   }
 
-  // createArgument(parameter: IControllerParameter, control: Prop) {
   createArgument(parameter: IControllerParameter, control: Prop): IArgument {
     // when in body, always receive dto
     if (parameter.in === 'body') {
-      this.imports.add(ImportFrom.dto, control.type);
+      if (control.control.isDto) {
+        this.imports.add(ImportFrom.dto, control.importType);
+      }
       this.httpBody = parameter.name;
 
       if (control.control.isPageable) {
@@ -249,7 +256,7 @@ ${insideMethod}
       }
     } else if (parameter.in === 'formData') {
       if (control.control.isDto) {
-        this.imports.add(ImportFrom.dto, control.type);
+        this.imports.add(ImportFrom.dto, control.importType);
       }
       this.httpBody = parameter.name;
     } else if (parameter.in === 'path') {
@@ -257,10 +264,12 @@ ${insideMethod}
     } else if (parameter.in === 'query') {
       const camelcaseName = camelCase(parameter.name);
       // possibly need to add conversions for other types
-      const querieArgument = parameter.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
-      this.queries.add(`.set('${parameter.name}', ${querieArgument})`);
+      const queryArgument = parameter.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
+      this.queries.add(`.set('${parameter.name}', ${queryArgument})`);
 
       this.imports.add(ImportFrom.http, 'HttpParams');
+    } else if (parameter.in === 'header') {
+      this.headers.add(`'${parameter.description}': '${parameter.name}'`)
     }
     // add required or default cases
     const arg: IArgument = {
@@ -280,7 +289,6 @@ ${insideMethod}
     return arg;
   }
 }
-
 
 function generateServices(data: any) {
   const controllerMap = new Map<string, GFile>();

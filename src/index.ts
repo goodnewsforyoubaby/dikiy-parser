@@ -21,6 +21,6 @@ async function generate(path: string, isFile = false, services = false) {
   }
 }
 
-generate('api-docs.json', true, false)
+generate('api-docs.json', true, true)
   .then(() => console.log('done'))
   .catch(err => console.error(err));

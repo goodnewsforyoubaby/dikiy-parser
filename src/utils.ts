@@ -1,7 +1,13 @@
 import fs, { existsSync, mkdirSync, writeFile } from 'fs';
 import path from 'path';
 import { IControllerBase, IControllerSchema } from 'ISwagger';
-import { get } from "http";
+import { get } from 'http';
+import prettier from 'prettier';
+import parser from 'prettier/parser-typescript';
+
+function prettify(code: string): string {
+  return prettier.format(code, { parser: 'typescript'});
+}
 
 enum ImportFrom {
   dto ='@private-dto',
@@ -62,19 +68,37 @@ function getJsonFile(filePath: string): any {
 }
 
 interface Dto {
-  type: string;
+  types: string[];
   pageable: boolean;
 }
 
-function getFirstMatch(value: string, regExp: RegExp): string | null {
+function getMatch(value: string, regExp: RegExp, index: number): string | null {
   const matches = regExp.exec(value);
-  if (matches !== null && matches[1] !== null) {
-    if (matches[1] !== null) {
-      return matches[1];
+  if (matches !== null && matches[index] !== null) {
+    if (matches[index] !== null) {
+      return matches[index];
     }
   }
   return null;
 }
+
+function getFirstMatch(value: string, regExp: RegExp): string | null {
+  return getMatch(value, regExp, 1);
+}
+
+function extractDto(dto: string, dtos: string[]) {
+  const firstDto = getFirstMatch(dto, /(.+)(«(.+)»)/);
+  if (firstDto === null) {
+    dtos.push(dto);
+    return dtos;
+  }
+
+  dtos.push(firstDto);
+  const secondDto = getMatch(dto, /(.+)«(.+)»$/, 2);
+  secondDto !== null && extractDto(secondDto, dtos);
+  return dtos;
+}
+
 
 function matchDto(ref: string): Dto {
   const dto = getFirstMatch(ref, /^#\/definitions\/(.+)/);
@@ -84,10 +108,10 @@ function matchDto(ref: string): Dto {
 
   const pageableDto = getFirstMatch(dto, /(?:Page|PaginationResponse)«(.+)»/);
   if (pageableDto !== null) {
-    return { pageable: true, type: pageableDto };
+    return { pageable: true, types: extractDto(pageableDto, []) };
   }
 
-  return { pageable: false, type: dto };
+  return { pageable: false, types: extractDto(dto, []) };
 }
 
 interface Prop {
@@ -133,7 +157,9 @@ function getProp(value: IControllerBase, control: PropControl): Prop {
         const additionalProperties = (value as IControllerSchema)?.additionalProperties;
 
         if (additionalProperties) {
-          type = getProp(additionalProperties, control).type;
+          const prop = getProp(additionalProperties, control);
+          type = prop.type;
+          importType = prop.importType;
         } else {
           type = 'any';
         }
@@ -141,16 +167,25 @@ function getProp(value: IControllerBase, control: PropControl): Prop {
       }
     }
   } else if (value?.schema) {
-    type = getProp(value.schema, control).type;
+    const prop = getProp(value.schema, control);
+    type = prop.type;
+    importType = prop.importType;
+    // type = getProp(value.schema, control).type;
+    // importType = type;
   } else if (value?.$ref) {
+    // consider taking this to the outside
     control.isDto = true;
     const dto = matchDto(value.$ref);
 
     if (dto.pageable) {
       control.isPageable = true;
     }
-    type = dto.type;
-    importType = dto.type;
+    if (dto.types.length === 1) {
+      type = dto.types[0];
+      importType = dto.types[0];
+    }
+    type = 'dot';
+    importType = 'dot';
   }
 
   if (type === '') {
@@ -219,4 +254,5 @@ export {
   IArgument,
   saveFile,
   createSwaggerRequest,
+  prettify,
 }
