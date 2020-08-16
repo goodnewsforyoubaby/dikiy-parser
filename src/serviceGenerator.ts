@@ -1,58 +1,92 @@
-import { loadJsonFile, pushUniqueValue, filterArrayForUniqueValues, createProp, saveFile } from "./utils";
-import { camelCase } from "lodash";
+import path from 'path';
+import { camelCase, upperFirst } from 'lodash';
+import {
+  createStringLiteralFromUrl,
+  getFirstMatch,
+  getProp,
+  IArgument,
+  ImportFrom,
+  Imports,
+  Prop,
+  SetWrapper,
+  saveFile,
+} from './utils';
+import { IControllerMethod, IControllerParameter, IControllerSchema } from './ISwagger';
 
-interface Argument {
-  str: string,
-  required: boolean;
+class GPart {
+  imports: Imports;
   name: string;
-  type: string;
-  in: string;
+
+  constructor(name: string, imports: Imports) {
+    this.name = name;
+    this.imports = imports;
+  }
 }
 
-class Service {
+class GFile {
   name: string;
-  controllerName: string;
-  deps: string[] = [];
-  dtoImports: string[] = [];
-  pluginImports: string[] = [];
-  httpImports: string[] = ['HttpClient'];
-  services: string[] = ['private http: HttpClient'];
-  methods: string[] = [];
-  str: string;
-  // inject fileDownloader as service:
-  //   private fileDownloader: FileDownloaderService
-  // instead of http request, use:
-  //   this.fileDownloader.download(url);
 
-  constructor(controllerName: string) {
-    this.controllerName = controllerName
+  exports: string[] = [];
+  imports: Imports = new Imports();
+
+  classes: GServiceClass[] = [];
+
+  constructor(name: string) {
+    this.name = name
       .split('-')
       .slice(0, -1)
       .join('-');
+  }
 
-    this.name = controllerName
+  createServiceClass(name: string): GServiceClass {
+    const gClass = new GServiceClass(name, this.imports);
+    this.classes.push(gClass);
+    return gClass;
+  }
+
+  toString() {
+    const importsStr = this.imports.get().join('\n');
+    const classesStr = this.classes.join('\n');
+
+    return `${importsStr}
+    
+    ${classesStr} `
+  }
+  save(directory: string, extension: string) {
+    saveFile(`${this.name}${extension}`, directory, this.toString());
+  }
+}
+
+class GServiceClass extends GPart {
+  methods: GServiceMethod[] = [];
+  services: string[] = [];
+
+  constructor(name: string, imports: Imports) {
+    super(name, imports)
+    this.name = name
       .split('-')
       .slice(0, -1)
       .map(word => word[0].toUpperCase() + word.slice(1, word.length))
       .join('') + 'Service';
-    this.str = '';
+
+    this.services.push('private http: HttpClient');
+
+    this.imports.add(ImportFrom.core, 'Injectable');
+    this.imports.add(ImportFrom.rxjs, 'Observable');
+    this.imports.add(ImportFrom.http, 'HttpClient')
   }
 
-  createTemplate(): string {
-    const imports = [
-      this.createImportStr('@private-dto', this.dtoImports),
-      this.createImportStr('@models/plugins', this.pluginImports),
-      this.createImportStr('@angular/common/http', this.httpImports),
-    ];
+  addServiceMethod(requestType: string, requestUrl: string, data: IControllerMethod) {
+    const gMethod = new GServiceMethod(requestType, requestUrl, data, this.imports);
+    this.methods.push(gMethod);
+    return gMethod;
+  }
 
+  toString() {
     const servicesStr = this.services.join(', ');
     const methodsStr = this.methods.join('\n');
-    const importsStr = imports.filter(i => i !== '').join('\n');
 
-    this.str = `import { Injectable } from '@angular/core';
-import { Observable } from 'rxjs';
-${importsStr}
-
+    return `
 @Injectable({
   providedIn: 'root',
 })
@@ -61,212 +95,215 @@ export class ${this.name} {
   \n${methodsStr}
 }
 `
-    return this.str;
+   }
+}
+
+class GServiceMethod extends GPart {
+  httpBody = '';
+  returnValue = ''
+  returnType = ''
+  insideLines: string[] = [];
+
+  arguments: IArgument[] = [];
+  queries = new SetWrapper();
+  httpOptions: string[] = [];
+
+  requestType: string;
+  requestUrl: string;
+
+  constructor(requestType: string, requestUrl: string, data: IControllerMethod, imports: Imports) {
+    super(data.summary, imports);
+    // super(data.summary, imports);
+    this.requestType = requestType;
+    this.requestUrl = requestUrl;
+
+    // get method arguments
+    this.arguments = this.getArguments(data);
+
+    this.httpBody = this.getBody();
+
+    // extract method name
+    this.name = this.getMethodName(data.operationId);
+
+    // get return type
+    const schema = data.responses["200"]?.schema;
+    this.returnType = this.createReturnType(schema)
+
   }
 
-  createImportStr(from: string, arr: string[]): string {
-    return arr.length > 0 ? `import { ${arr.join(', ')} } from '${from}';` : '';
+  toString() {
+    const argumentsStr = this.arguments.map(arg => arg.str).join(', ');
+
+    this.insideLines.push(`const url = \`${createStringLiteralFromUrl(this.requestUrl)}\`;`);
+
+    if (this.queries.get().length > 0) {
+      this.httpOptions.push('params');
+      this.insideLines.push(`const params = new HttpParams()${this.queries.get().join('')};`);
+    }
+
+    const optionsStr = this.httpOptions.length > 0 ? `, { ${this.httpOptions.join(', ')} }` : '';
+    const httpBodyStr = this.httpBody !== '' ? `, ${this.httpBody}` : '';
+    this.insideLines.push(`return this.http.${this.requestType}<${this.returnType}>(url${httpBodyStr}${optionsStr});`);
+
+    const insideMethod = this.insideLines
+      .map(str => `    ${str}`)
+      .join('\n');
+
+    return `  ${this.name}(${argumentsStr}): Observable<${this.returnType}> {
+${insideMethod}
+  }
+    `;
   }
 
-  addMethod(url: string, requestMethod: string, methodInfo: any) {
-    const queries: string[] = [];
-    const httpArguments: string[] = [];
-    let methodArguments: Argument[] = [];
-    const options: string[] = [];
+  getBody() {
+    if (this.requestType === 'post' || this.requestType === 'put') {
+      if (this.httpBody === '') {
+        return 'undefined';
+      }
+    }
+    return this.httpBody;
+  }
 
+  getArguments(data: IControllerMethod) {
+    // to prevent duplication of formData
     let formDataExists = false;
     let formDataOptionalExists = false;
-    
-    if (methodInfo?.parameters) {
-      for (const parameter of methodInfo.parameters) {
-        const argument = this.addArgument(parameter, httpArguments, queries);
-        if (argument.in === 'formData') {
-          if (argument.required) {
+
+    const parameters = data.parameters;
+    let args: IArgument[] = [];
+    if (parameters && parameters.length > 0) {
+      parameters.forEach(parameter => {
+        const prop = getProp(parameter, { isDto: false, isPageable: false, isArray: false });
+
+        if (parameter.in === 'formData') {
+          if (parameter.required) {
             formDataExists = true;
-          } else if (!argument.required) {
+          } else if (!parameter.required) {
             formDataOptionalExists = true;
           }
         }
-
-        methodArguments.push(argument);
-        // inject fileDownloader as service:
-        //   private fileDownloader: FileDownloaderService
-        // instead of http request, use:
-        //   return this.fileDownloader.download(url);
-      }
+        args.push(this.createArgument(parameter, prop));
+      })
     }
 
-    // method arguments: get rid of formdata duplication
     if (formDataExists && formDataOptionalExists) {
-      methodArguments = methodArguments.filter(methodArg => {
-        if (methodArg.in === 'formData' && methodArg.required === false) {
+      args = args.filter(arg => {
+        if (arg.in === 'formData' && !arg.required) {
           return false;
         }
         return true;
       })
     }
+    return args;
+  }
 
-    // sort arguments, in case some of them have default parameter
-    methodArguments.sort((a, b) => {
-      const aNum = a.required ? 1 : 0;
-      const bNum = b.required ? 1 : 0;
-      return bNum - aNum;
-    })
-
-    // extract method name
-    const matches = /^(.+)Using.{2,10}$/.exec(methodInfo.operationId as string);
-    let name = '';
-    if (matches) {
-      name = matches[1];
+  getMethodName(unparsedName: string) {
+    const name = getFirstMatch(unparsedName, /(.+)Using.+$/);
+    if (name) {
+      return name;
     } else {
-      console.error(`Operation Id does not match regex: ${matches}`);
+      throw 'Could not find method name';
     }
+  }
 
-    // determine return type
+  createReturnType(schema: IControllerSchema | undefined) {
     let returnType = '';
-    const schema = methodInfo.responses["200"]?.schema;
     if (schema) {
-      const { str, pageable } = createProp(schema, this.deps, this.dtoImports);
-      returnType = str;
-
-      if (pageable) {
-        returnType = 'any';
-        // returnType = `PageableResponseBody<${str}>`
-        // pushUniqueValue(this.pluginImports, 'PageableResponseBody');
-      } else if (schema.format === 'byte') {
-        options.push(`responseType: 'blob'`);
-        options.push(`observe: 'response'`);
-        returnType = schema.type;
+      const prop = getProp(schema, { isDto: false, isPageable: false, isArray: false });
+      if (prop.control.isDto) {
+        this.imports.add(ImportFrom.dto, prop.importType);
       }
-              // this.imports.push(returnType);
+
+      if (prop.control.isPageable) {
+        // this.returnType = 'any';
+        returnType = `PageableResponseBody<${prop.type}>`
+        this.imports.add(ImportFrom.plugins, 'PageableResponseBody');
+      } else if (schema.format === 'byte') {
+        this.httpOptions.push(`responseType: 'blob'`);
+        this.httpOptions.push(`observe: 'response'`);
+        if (schema.type) {
+          returnType = schema.type;
+        } else {
+          throw 'Cannot parse file return type'
+        }
+      } else {
+        returnType = prop.type;
+      }
     } else {
       returnType = 'void';
     }
 
+    return returnType;
+  }
 
-    let httpBodyStr = httpArguments.length > 0 ? `, ${httpArguments.join(', ')}` : '';
-    if (requestMethod === 'post' || requestMethod === 'put') {
-      if (httpArguments.length === 0) {
-         httpBodyStr = ', undefined';
+  // createArgument(parameter: IControllerParameter, control: Prop) {
+  createArgument(parameter: IControllerParameter, control: Prop): IArgument {
+    // when in body, always receive dto
+    if (parameter.in === 'body') {
+      this.imports.add(ImportFrom.dto, control.type);
+      this.httpBody = parameter.name;
+
+      if (control.control.isPageable) {
+        this.imports.add(ImportFrom.plugins, 'PageableRequestBody');
+        control.type = `PageableRequestBody<${control.type}>`;
       }
-    }
-
-    const argumentsStr =  filterArrayForUniqueValues(methodArguments.map(arg => arg.str)).join(', ');
-
-    const insideMethodUnfiltered: string[] = [];
-
-    if (queries.length > 0) {
-      options.push('params');
-      insideMethodUnfiltered.push(`const params = new HttpParams()${queries.join('')};`);
-    }
-
-    const optionsStr = options.length > 0 ? `, { ${options.join(', ')} }` : '';
-
-    insideMethodUnfiltered.push(`const url = \`${this.createStringLiteralFromUrl(url)}\``);
-    insideMethodUnfiltered.push(`return this.http.${requestMethod}<${returnType}>(url${httpBodyStr}${optionsStr})`);
-
-    const insideMethod = insideMethodUnfiltered
-      .map(str => `    ${str}`)
-      .join('\n');
-
-    const method = 
-      `  ${name}(${argumentsStr}): Observable<${returnType}> {
-${insideMethod}
-  }
-    `;
-    // console.log(this.str);
-    this.methods.push(method)
-  }
-
-  createStringLiteralFromUrl(url: string): string {
-    const something = url.split('{');
-    for (let i = 1; i < something.length; i += 1) {
-      something[i] = '${' + something[i];
-    }
-    return something.join('');
-  }
-
-  addArgument(parameter: any, httpArguments: string[], queries: string[]): Argument {
-    let name = parameter.name as string;
-    let type = parameter.type as string;
-    const inArgument = parameter.in as string;
-
-    const required = parameter.required as boolean;
-    const schema = parameter.schema;
-
-    let str = '';
-
-    if (inArgument === 'body') {
-      const { str, pageable }  = createProp(schema, this.deps, this.dtoImports);
-      // name = 'body';
-      if (pageable) {
-        type = 'any';
-        // type = `PageableRequestBody<${str}>`;
-        // pushUniqueValue(this.pluginImports, 'PageableRequestBody');
-      } else {
-        type = str;
+    } else if (parameter.in === 'formData') {
+      if (control.control.isDto) {
+        this.imports.add(ImportFrom.dto, control.type);
       }
-
-      pushUniqueValue(httpArguments, name);
-      // pushUniqueValue(this.pageableImports, type);
-    } else if (inArgument === 'path') {
-      type = createProp(parameter, this.deps, this.dtoImports).str;
-    } else if (inArgument === 'formData') {
-      name = 'formData';
-      type = 'FormData';
-      pushUniqueValue(httpArguments, 'formData');
-    } else if (inArgument === 'query') {
-      type = createProp(parameter, this.deps, this.dtoImports).str;
-
-      const camelcaseName = camelCase(name);
+      this.httpBody = parameter.name;
+    } else if (parameter.in === 'path') {
+      // do nothing
+    } else if (parameter.in === 'query') {
+      const camelcaseName = camelCase(parameter.name);
       // possibly need to add conversions for other types
-      const querieArgument = type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
-      queries.push(`.set('${name}', ${querieArgument})`);
-      pushUniqueValue(this.httpImports, 'HttpParams');
+      const querieArgument = parameter.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
+      this.queries.add(`.set('${parameter.name}', ${querieArgument})`);
+
+      this.imports.add(ImportFrom.http, 'HttpParams');
+    }
+    // add required or default cases
+    const arg: IArgument = {
+      name: parameter.name,
+      type: control.type,
+      default: parameter.default,
+      required: parameter.required,
+      in: parameter.in,
+      str: '',
     }
 
-     name = camelCase(name);
-
-    if (parameter?.default !== undefined) {
-      str = `${name}: ${type} = ${parameter.default}`;
+    if (arg.default !== undefined) {
+      arg.str = `${arg.name}: ${arg.type} = ${arg.default}`;
     } else {
-      str = `${name}${required ? '' : '?'}: ${type}`;
+      arg.str = `${arg.name}${arg.required ? '' : '?'}: ${arg.type}`;
     }
-
-    return { str, required, name, type, in: inArgument };
+    return arg;
   }
 }
 
-function generateSevices(jsonPaths: any): Map<string, Service> {
-  // first we need to order paths by their tag
-  // would be enough to have map of tags with their
-  const tagsMap = new Map<string, Service>()
-  for (const [url, info] of Object.entries<any>(jsonPaths)) {
-    for (const [methodName, methodInfo] of Object.entries<any>(info)) {
-      const controller = methodInfo.tags[0] as string;
 
-      let service = tagsMap.get(controller);
+function generateServices(data: any) {
+  const controllerMap = new Map<string, GFile>();
+  for (const [url, controllerInside] of Object.entries<any>(data.paths)) {
+    for (const [requestType, requestInside] of Object.entries<IControllerMethod>(controllerInside)) {
+      const name = requestInside.tags[0];
+      let file = controllerMap.get(name);
+      if (file === undefined) {
+        file = new GFile(name);
+        controllerMap.set(name, file);
 
-      if (!service) {
-        service = new Service(controller);
-        tagsMap.set(controller, service);
+        const className = upperFirst(name);
+        file.createServiceClass(className);
       }
-      service.addMethod(url, methodName, methodInfo);
+      const gClass = file.classes[0];
+
+      const gMethod = gClass.addServiceMethod(requestType, url, requestInside);
     }
   }
 
-  return tagsMap;
-}
-
-function parseAllFiles() {
-  const { paths }  = loadJsonFile('/api-docs.json');
-
-  const tagsMap = generateSevices(paths);
-
-  for (const [tag, service] of tagsMap.entries()) {
-      const template = service.createTemplate();
-      saveFile(`${service.controllerName}.service.ts`, 'services', template);
+  for (const [name, file] of controllerMap.entries()) {
+    file.save('services', '.service.ts');
   }
 }
 
-export { parseAllFiles };
+export { generateServices };

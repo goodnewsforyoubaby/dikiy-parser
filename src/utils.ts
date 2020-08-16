@@ -1,32 +1,173 @@
-import { mkdirSync, existsSync, writeFile, readdir } from 'fs';
-import { get } from 'http';
-import fs from 'fs';
-import kebabCase from 'lodash.kebabcase';
-import { camelCase } from 'lodash';
+import fs, { existsSync, mkdirSync, writeFile } from 'fs';
+import path from 'path';
+import { IControllerBase, IControllerSchema } from 'ISwagger';
+import { get } from "http";
+
+enum ImportFrom {
+  dto ='@private-dto',
+  http ='@angular/common/http',
+  plugins = '@models/plugins',
+  core = '@angular/core',
+  rxjs = 'rxjs',
+}
+
+interface IArgument {
+  name: string,
+  type: string,
+  default: string | undefined,
+  required: boolean,
+  in: string,
+  str: string,
+}
+
+class Imports {
+  imports: Map<ImportFrom, Set<string>> = new Map<ImportFrom, Set<string>>();
+
+  add(importFrom: ImportFrom, value: string) {
+    let set = this.imports.get(importFrom);
+    if (!set) {
+      set = new Set();
+      this.imports.set(importFrom, set);
+    }
+    set?.add(value);
+  }
+
+  get(): string[] {
+    const multipleImports: string[] = []
+    // const importsArray: string[] = [];
+    for (const [from, values] of this.imports.entries()) {
+      const valuesStr = Array.from(values).join(', ');
+      multipleImports.push(`import { ${valuesStr} } from '${from}';`);
+    }
+    return multipleImports;
+  }
+}
+
+class SetWrapper<T> {
+  set: Set<T> = new Set<T>();
+
+  add(data: T) {
+    this.set.add(data);
+  }
+
+  get(): T[] {
+    return Array.from(this.set);
+  }
+}
+
+function getJsonFile(filePath: string): any {
+  const p = path.join(__dirname, filePath);
+  const buffer = fs.readFileSync(p, 'utf8');
+  return JSON.parse(buffer);
+}
+
+interface Dto {
+  type: string;
+  pageable: boolean;
+}
+
+function getFirstMatch(value: string, regExp: RegExp): string | null {
+  const matches = regExp.exec(value);
+  if (matches !== null && matches[1] !== null) {
+    if (matches[1] !== null) {
+      return matches[1];
+    }
+  }
+  return null;
+}
+
+function matchDto(ref: string): Dto {
+  const dto = getFirstMatch(ref, /^#\/definitions\/(.+)/);
+  if (dto === null) {
+    throw 'Could not convert ref';
+  }
+
+  const pageableDto = getFirstMatch(dto, /(?:Page|PaginationResponse)«(.+)»/);
+  if (pageableDto !== null) {
+    return { pageable: true, type: pageableDto };
+  }
+
+  return { pageable: false, type: dto };
+}
 
 interface Prop {
-  pageable: boolean;
-  str: string;
+  type: string,
+  importType: string,
+  control: PropControl,
 }
 
-const TYPES = {
-  string: 'string',
-  integer: 'integer',
-  number: 'number',
-  boolean: 'boolean',
-  array: 'array',
-  object: 'object',
-};
-
-const DEFAULTS = {
-  swaggerURL: 'http://localhost:8080/v2/api-docs',
-};
-
-function filterArrayForUniqueValues(arr: string[]): string[] {
-  return arr.filter((v, i, a) => a.indexOf(v) === i);
+interface PropControl {
+  isDto: boolean;
+  isPageable: boolean;
+  isArray: boolean;
 }
 
-// function saveFile(dtoName: string, data: string) {
+function getProp(value: IControllerBase, control: PropControl): Prop {
+  let type = '';
+  let importType = '';
+
+  if (value.type) {
+    switch (value.type) {
+      case TYPES.string:
+      case TYPES.boolean:
+        type = value.type;
+        break;
+      case TYPES.number:
+      case TYPES.integer:
+        type = TYPES.number;
+        break;
+      case TYPES.file:
+        type = 'FormData';
+        break;
+      case TYPES.array:
+        if (value.items) {
+          control.isArray = true;
+          importType = getProp(value.items, control).type;
+          type = `${importType}[]`
+        } else {
+          throw 'Parsing array: error';
+        }
+        break;
+      case TYPES.object: {
+        // only schema can have additional properties
+        const additionalProperties = (value as IControllerSchema)?.additionalProperties;
+
+        if (additionalProperties) {
+          type = getProp(additionalProperties, control).type;
+        } else {
+          type = 'any';
+        }
+        break;
+      }
+    }
+  } else if (value?.schema) {
+    type = getProp(value.schema, control).type;
+  } else if (value?.$ref) {
+    control.isDto = true;
+    const dto = matchDto(value.$ref);
+
+    if (dto.pageable) {
+      control.isPageable = true;
+    }
+    type = dto.type;
+    importType = dto.type;
+  }
+
+  if (type === '') {
+    throw `Cannot parse ${value.toString()}`
+  }
+
+  return { type, importType, control };
+}
+
+function createStringLiteralFromUrl(url: string): string {
+  const something = url.split('{');
+  for (let i = 1; i < something.length; i += 1) {
+    something[i] = '${' + something[i];
+  }
+  return something.join('');
+}
+
 function saveFile(fileName: string, folder: string, data: string): void {
   // const fileName = `${kebabCase(dtoName)}.service.ts`;
   const path = `${__dirname}/${folder}/`;
@@ -40,89 +181,9 @@ function saveFile(fileName: string, folder: string, data: string): void {
   });
 }
 
-function matchDtoName(definition: string): (string | null) {
-  // const matches = definition.match(/[^?#\/definitions\/](\w+)/);
-  const matches = definition.match(/^#\/definitions\/(.+)/)
-  if (matches !== null) {
-    return matches[1].trim();
-  } else {
-    console.error('Ошибка в партсинге #/definitions', definition);
-    return null;
-  }
-}
-
-function pushUniqueValue(arr: any[], value: any) {
-  if (arr.indexOf(value) === -1) {
-    arr.push(value);
-  }
-}
-
-function simpleCreateProp(propValue: { [k: string]: any}): string {
-  let prop = '';
-  const { type } = propValue;
-  if (type == TYPES.string) {
-    prop = `${TYPES.string}`;
-  } else if (type === TYPES.integer || type === TYPES.number) {
-    prop = `${TYPES.number}`;
-  } else if (type === TYPES.boolean) {
-    prop = `${TYPES.boolean}`;
-  }
-  return prop;
-}
-
-function createProp(propValue: { [k: string]: any }, deps: string[], imports: string[], ending = ''): Prop {
-  let prop = '';
-  let pageable = false;
-  const { type } = propValue;
-  if (type == TYPES.string) {
-    prop += `${TYPES.string}`;
-  } else if (type === TYPES.integer || type === TYPES.number) {
-    prop += `${TYPES.number}`;
-  } else if (type === TYPES.boolean) {
-    prop += `${TYPES.boolean}`;
-  } else if (type === TYPES.object) {
-    if (propValue.additionalProperties) {
-      prop += `{ [k: string]: ${createProp(propValue.additionalProperties, deps, imports).str} }`;
-    } else {
-      prop += `{ [k: string]: any }`;
-    }
-  } else if (type == TYPES.array) {
-    prop += `${createProp(propValue.items, deps, imports, '[]').str}`;
-  } else if (type === undefined && typeof propValue.$ref === 'string') {
-    let depDtoName = matchDtoName(propValue.$ref);
-
-    const regex = /(Page|PaginationResponse)«(.*)»/
-    if (depDtoName) {
-      const result = regex.exec(depDtoName);
-      if (result) {
-        depDtoName = result[2];
-        pageable = true;
-      }
-    }
-
-    // if (depDtoName !== null && !deps.includes(propValue.$ref)) {
-    if (depDtoName !== null && !deps.includes(depDtoName)) {
-      imports.push(depDtoName);
-      deps.push(depDtoName);
-    }
-    prop += `${depDtoName}`;
-  } else {
-    throw new Error('Ошибка парсинга');
-  }
-  // return prop + ending;
-  return { str: prop + ending, pageable };
-}
-
-function loadJsonFile(fileName: string): any {
-  const path = process.cwd();
-  // const rawdata = fs.readFileSync(__dirname + "/api-docs.json");
-  const rawdata = fs.readFileSync(__dirname + '/' + fileName);
-  return JSON.parse(rawdata.toString());
-}
-
-function createSwaggerRequest(url: string): Promise<string> {
+function createSwaggerRequest(swaggerURL: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    get(url, res => {
+    get(swaggerURL, res => {
       let data = '';
       res
         .on('data', chunk => (data += chunk))
@@ -132,18 +193,30 @@ function createSwaggerRequest(url: string): Promise<string> {
   });
 }
 
+const TYPES = {
+  string: 'string',
+  array: 'array',
+  number: 'number',
+  integer: 'integer',
+  boolean: 'boolean',
+  file: 'file',
+  object: 'object',
+}
 
 
-export { 
-  TYPES, 
-  DEFAULTS, 
-  Prop, 
-  filterArrayForUniqueValues, 
-  saveFile, 
-  matchDtoName, 
-  pushUniqueValue, 
-  simpleCreateProp, 
-  createProp,
-  loadJsonFile,
+export {
+  Imports,
+  ImportFrom,
+  SetWrapper,
+  getJsonFile,
+  matchDto,
+  getProp,
+  TYPES,
+  getFirstMatch,
+  PropControl,
+  Prop,
+  createStringLiteralFromUrl,
+  IArgument,
+  saveFile,
   createSwaggerRequest,
-};
+}
