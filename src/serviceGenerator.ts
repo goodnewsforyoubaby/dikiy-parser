@@ -7,9 +7,10 @@ import {
   IArgument,
   ImportFrom,
   Imports,
+  prettify,
   Prop,
+  saveFile,
   SetWrapper,
-  saveFile, prettify,
 } from './utils';
 import { IControllerMethod, IControllerParameter, IControllerSchema } from './ISwagger';
 
@@ -116,7 +117,6 @@ class GServiceMethod extends GPart {
 
   constructor(requestType: string, requestUrl: string, data: IControllerMethod, imports: Imports) {
     super(data.summary, imports);
-    // super(data.summary, imports);
     this.requestType = requestType;
     this.requestUrl = requestUrl;
 
@@ -142,6 +142,12 @@ class GServiceMethod extends GPart {
     if (this.queries.get().length > 0) {
       this.httpOptions.push('params');
       this.insideLines.push(`const params = new HttpParams()${this.queries.get().join('')}`);
+    }
+
+    if (this.headers.get().length > 0) {
+      this.httpOptions.push('headers');
+      this.insideLines.push(`const headers = new HttpHeaders()${this.headers.get().join('')}`);
+      console.log(`const headers = new HttpHeaders()${this.headers.get().join('')}`);
     }
 
     const optionsStr = this.httpOptions.length > 0 ? `, { ${this.httpOptions.join(', ')} }` : '';
@@ -175,11 +181,6 @@ class GServiceMethod extends GPart {
     if (parameters && parameters.length > 0) {
       parameters.forEach(parameter => {
         const prop = getProp(parameter, { isDto: false, isPageable: false, isArray: false });
-
-        // for names like 'X-User-Uuid', they are not valid in js
-        if (parameter.name.split('-').length > 1) {
-          parameter.name = parameter.name.split('-').join('');
-        }
 
         if (parameter.in === 'formData') {
           if (parameter.required) {
@@ -243,6 +244,8 @@ class GServiceMethod extends GPart {
   }
 
   createArgument(parameter: IControllerParameter, control: Prop): IArgument {
+    // for names like 'X-User-Uuid', they are not valid in js
+    const camelcaseName = camelCase(parameter.name);
     // when in body, always receive dto
     if (parameter.in === 'body') {
       if (control.control.isDto) {
@@ -262,15 +265,16 @@ class GServiceMethod extends GPart {
     } else if (parameter.in === 'path') {
       // do nothing
     } else if (parameter.in === 'query') {
-      const camelcaseName = camelCase(parameter.name);
       // possibly need to add conversions for other types
       const queryArgument = parameter.type === 'boolean' ? `String(${camelcaseName})` : camelcaseName;
       this.queries.add(`.set('${parameter.name}', ${queryArgument})`);
 
       this.imports.add(ImportFrom.http, 'HttpParams');
     } else if (parameter.in === 'header') {
-      this.headers.add(`'${parameter.description}': '${parameter.name}'`)
+      this.headers.add(`.set('${parameter.name}', ${camelcaseName})`);
+      this.imports.add(ImportFrom.http, 'HttpHeaders');
     }
+    parameter.name = camelcaseName;
     // add required or default cases
     const arg: IArgument = {
       name: parameter.name,

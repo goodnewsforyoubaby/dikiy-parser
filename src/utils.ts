@@ -158,10 +158,10 @@ function getProp(value: IControllerBase, control: PropControl): Prop {
 
         if (additionalProperties) {
           const prop = getProp(additionalProperties, control);
-          type = prop.type;
+          type = `{ [k: string]: ${prop.type} }`;
           importType = prop.importType;
         } else {
-          type = 'any';
+          type = `{ [k: string]: any }`;
         }
         break;
       }
@@ -175,17 +175,21 @@ function getProp(value: IControllerBase, control: PropControl): Prop {
   } else if (value?.$ref) {
     // consider taking this to the outside
     control.isDto = true;
+    // work correctly around matchDto returning multiple dtos
     const dto = matchDto(value.$ref);
 
     if (dto.pageable) {
       control.isPageable = true;
     }
+
     if (dto.types.length === 1) {
       type = dto.types[0];
       importType = dto.types[0];
+    } else {
+      console.log(dto.types);
+      type = 'dot';
+      importType = 'dot';
     }
-    type = 'dot';
-    importType = 'dot';
   }
 
   if (type === '') {
