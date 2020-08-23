@@ -147,7 +147,6 @@ class GServiceMethod extends GPart {
     if (this.headers.get().length > 0) {
       this.httpOptions.push('headers');
       this.insideLines.push(`const headers = new HttpHeaders()${this.headers.get().join('')}`);
-      console.log(`const headers = new HttpHeaders()${this.headers.get().join('')}`);
     }
 
     const optionsStr = this.httpOptions.length > 0 ? `, { ${this.httpOptions.join(', ')} }` : '';

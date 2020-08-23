@@ -3,10 +3,25 @@ import path from 'path';
 import { IControllerBase, IControllerSchema } from 'ISwagger';
 import { get } from 'http';
 import prettier from 'prettier';
-import parser from 'prettier/parser-typescript';
 
 function prettify(code: string): string {
-  return prettier.format(code, { parser: 'typescript'});
+  return prettier.format(code,
+    {
+      parser: 'typescript',
+      printWidth: 160,
+      tabWidth: 2,
+      useTabs: false,
+      semi: true,
+      singleQuote: true,
+      trailingComma: "es5",
+      bracketSpacing: true,
+      jsxBracketSameLine: true,
+      arrowParens: "avoid",
+      rangeStart: 0,
+      requirePragma: false,
+      insertPragma: false,
+      proseWrap: "preserve"
+  });
 }
 
 enum ImportFrom {
