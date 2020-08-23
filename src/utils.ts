@@ -141,6 +141,10 @@ interface PropControl {
   isArray: boolean;
 }
 
+function getPropertyWithMeta(value: IControllerBase): Prop {
+  return getProp(value, { isDto: false, isPageable: false, isArray: false });
+}
+
 function getProp(value: IControllerBase, control: PropControl): Prop {
   let type = '';
   let importType = '';
@@ -274,4 +278,5 @@ export {
   saveFile,
   createSwaggerRequest,
   prettify,
+  getPropertyWithMeta,
 }

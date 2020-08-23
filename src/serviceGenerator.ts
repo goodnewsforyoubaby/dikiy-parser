@@ -3,7 +3,7 @@ import { camelCase, upperFirst } from 'lodash';
 import {
   createStringLiteralFromUrl,
   getFirstMatch,
-  getProp,
+  getPropertyWithMeta,
   IArgument,
   ImportFrom,
   Imports,
@@ -171,6 +171,7 @@ class GServiceMethod extends GPart {
   }
 
   getArguments(data: IControllerMethod) {
+    // there can be multiple formData arguments
     // to prevent duplication of formData
     let formDataExists = false;
     let formDataOptionalExists = false;
@@ -179,7 +180,7 @@ class GServiceMethod extends GPart {
     let args: IArgument[] = [];
     if (parameters && parameters.length > 0) {
       parameters.forEach(parameter => {
-        const prop = getProp(parameter, { isDto: false, isPageable: false, isArray: false });
+        const prop = getPropertyWithMeta(parameter);
 
         if (parameter.in === 'formData') {
           if (parameter.required) {
@@ -212,44 +213,41 @@ class GServiceMethod extends GPart {
     }
   }
 
-  createReturnType(schema: IControllerSchema | undefined) {
-    let returnType = '';
+  createReturnType(schema: IControllerSchema | undefined): string {
     if (schema) {
-      const prop = getProp(schema, { isDto: false, isPageable: false, isArray: false });
+      const prop = getPropertyWithMeta(schema);
       if (prop.control.isDto) {
         this.imports.add(ImportFrom.dto, prop.importType);
-      }
-
-      if (prop.control.isPageable) {
-        // this.returnType = 'any';
-        returnType = `PageableResponseBody<${prop.type}>`
-        this.imports.add(ImportFrom.plugins, 'PageableResponseBody');
+        if (prop.control.isPageable) {
+          // this.returnType = 'any';
+          // returnType = `PageableResponseBody<${prop.type}>`
+          this.imports.add(ImportFrom.plugins, 'PageableResponseBody');
+          return `PageableResponseBody<${prop.importType}>`
+        }
       } else if (schema.format === 'byte') {
         this.httpOptions.push(`responseType: 'blob'`);
         this.httpOptions.push(`observe: 'response'`);
         if (schema.type) {
-          returnType = schema.type;
+          return schema.type;
         } else {
           throw 'Cannot parse file return type'
         }
-      } else {
-        returnType = prop.type;
       }
-    } else {
-      returnType = 'void';
+      return prop.type;
     }
 
-    return returnType;
+    return 'void';
   }
 
   createArgument(parameter: IControllerParameter, control: Prop): IArgument {
     // for names like 'X-User-Uuid', they are not valid in js
     const camelcaseName = camelCase(parameter.name);
+
+    if (control.control.isDto) {
+      this.imports.add(ImportFrom.dto, control.importType);
+    }
     // when in body, always receive dto
     if (parameter.in === 'body') {
-      if (control.control.isDto) {
-        this.imports.add(ImportFrom.dto, control.importType);
-      }
       this.httpBody = parameter.name;
 
       if (control.control.isPageable) {
@@ -257,9 +255,6 @@ class GServiceMethod extends GPart {
         control.type = `PageableRequestBody<${control.type}>`;
       }
     } else if (parameter.in === 'formData') {
-      if (control.control.isDto) {
-        this.imports.add(ImportFrom.dto, control.importType);
-      }
       this.httpBody = parameter.name;
     } else if (parameter.in === 'path') {
       // do nothing
