@@ -1,6 +1,6 @@
 import { writeFile, readdir } from 'fs';
 import { kebabCase } from 'lodash';
-import { generateJsdocComment, saveFile, TYPES } from './utils';
+import { generateJsdocComment, prettify, saveFile, TYPES } from './utils';
 import { IInterfaceBody, IInterfaceParameter } from './ISwagger';
 
 export class DikiyParser {
@@ -50,7 +50,6 @@ export class DikiyParser {
       } else if (propValue?.allowEmptyValue != null) {
         optionalPropStr = propValue.allowEmptyValue ? '?' : '';
       }
-
       data += `  ${propName}${optionalPropStr}: ${propType}`;
       data += '\n';
     });
@@ -62,6 +61,13 @@ export class DikiyParser {
     let prop = '';
     const { type } = propValue;
     if (type == TYPES.string) {
+      // for enum
+      // if (propValue?.enum) {
+      //   const enums = propValue.enum.map(e => `'${e}'`).join(' | ');
+      //   prop += `(${enums})`
+      // } else {
+      //   prop += `${TYPES.string}`;
+      // }
       prop += `${TYPES.string}`;
     } else if (type === TYPES.integer || type === TYPES.number) {
       prop += `${TYPES.number}`;
@@ -96,7 +102,7 @@ export class DikiyParser {
 
   private saveFile(dtoName: string, data: string) {
     const fileName = `${kebabCase(dtoName)}.d.ts`;
-    saveFile(fileName, 'models', data);
+    saveFile(fileName, 'models', prettify(data));
   }
 
   private matchDtoName(definition: string) {
@@ -105,11 +111,13 @@ export class DikiyParser {
     if (matches !== null) {
 
       const match = matches[0].trim();
-      // const notAcceptablePageDef = /Page«.*»/.exec(match);
-      // const notAcceptableMatchDef = /Map«.*»/.exec(match);
-      // if (notAcceptablePageDef || notAcceptableMatchDef) {
-      //   return null;
-      // }
+      // const notAcceptable = ['Page', 'Map', 'PaginationResponse']
+      // notAcceptable.forEach(v => {
+      //   if (new RegExp(`${v}«.*»`).exec(match)) {
+      //     console.log(`Found unacceptable DTO: ${match}`);
+      //     return null;
+      //   }
+      // })
       return match;
     } else {
       console.error('Ошибка в партсинге #/definitions', definition);
@@ -125,7 +133,7 @@ export class DikiyParser {
       }
       let data = '';
       files.forEach(file => (data += `export * from "./${file.replace('/^M//g', '').replace('.d.ts', '')}"\n`));
-      writeFile(`${path}/index.d.ts`, data, err => {
+      writeFile(`${path}/index.d.ts`, prettify(data), err => {
         if (err) {
           throw new Error(err.message);
         }

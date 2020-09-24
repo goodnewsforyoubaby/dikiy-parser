@@ -15,7 +15,9 @@ enum GenerateFileDataOptions {
 function generateJsStructure(data: any, generateOptions: GenerateOptions) {
   if (generateOptions.services) {
     generateServices(data);
-  } else if (generateOptions.dtos) {
+  }
+
+  if (generateOptions.dtos) {
     new DikiyParser().generateDtos(data);
   }
 }
@@ -35,6 +37,6 @@ async function generate(path: string, generateFileDataOptions: GenerateFileDataO
   generateJsStructure(data, generateOptions);
 }
 
-generate('http://localhost:8080/v2/api-docs', GenerateFileDataOptions.request, { services: false, dtos: true })
+generate('http://192.168.2.241:45821/v2/api-docs', GenerateFileDataOptions.request, { services: true, dtos: false })
   .then(() => console.log('done'))
   .catch(err => console.error(err));
