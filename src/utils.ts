@@ -76,10 +76,9 @@ class SetWrapper<T> {
   }
 }
 
-function getJsonFile(filePath: string): any {
+function getJsonFile(filePath: string): string {
   const p = path.join(__dirname, filePath);
-  const buffer = fs.readFileSync(p, 'utf8');
-  return JSON.parse(buffer);
+  return fs.readFileSync(p, 'utf8');
 }
 
 interface Dto {
@@ -240,15 +239,22 @@ function saveFile(fileName: string, folder: string, data: string): void {
 }
 
 function createSwaggerRequest(swaggerURL: string): Promise<string> {
+  console.log(`Making request to: ${swaggerURL}`);
   return new Promise((resolve, reject) => {
     get(swaggerURL, res => {
       let data = '';
       res
         .on('data', chunk => (data += chunk))
-        .on('end', () => resolve(JSON.stringify(data)))
+        .on('end', () => resolve(data))
         .on('error', reject);
     });
   });
+}
+
+function generateJsdocComment(comment: string) {
+  return `/**
+  * ${comment}
+  */`
 }
 
 const TYPES = {
@@ -279,4 +285,5 @@ export {
   createSwaggerRequest,
   prettify,
   getPropertyWithMeta,
+  generateJsdocComment,
 }

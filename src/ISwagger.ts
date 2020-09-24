@@ -49,11 +49,39 @@ interface IControllerMethod {
   }
 }
 
-export { 
+interface IInterfaceParameter {
+  type: string;
+  name?: string;
+  in?: string;
+  description?: string;
+  required?: string;
+  schema?: string;
+  allowEmptyValue?: boolean;
+  items?: any;
+  example?: boolean;
+  $ref?: string;
+  format?: string;
+  enum?: string[];
+  additionalProperties?: any;
+  minimum?: number;
+  maximum?: number;
+}
+
+interface IInterfaceBody {
+  type: string;
+  properties?: { [k: string]: IInterfaceParameter };
+  title: string;
+  description?: string;
+}
+
+
+export {
   IControllerSchema,
   IControllerParameter,
   IControllerResponse,
   IControllerMethod,
   IControllerItems,
   IControllerBase,
+  IInterfaceParameter,
+  IInterfaceBody,
 }

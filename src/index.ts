@@ -2,25 +2,39 @@ import { getJsonFile, createSwaggerRequest } from './utils';
 import { generateServices} from './serviceGenerator';
 import { DikiyParser } from './dtoGenerator';
 
-const DEFAULTS = {
-  swaggerURL: 'http://localhost:8080/v2/api-docs',
-};
+interface GenerateOptions {
+  services: boolean;
+  dtos: boolean;
+}
 
-async function generate(path: string, isFile = false, services = false) {
-  let data = {};
-  if (isFile) {
-    data = getJsonFile(path);
-  } else {
-    data = await createSwaggerRequest(DEFAULTS.swaggerURL);
-  }
+enum GenerateFileDataOptions {
+  request,
+  file,
+}
 
-  if (services) {
+function generateJsStructure(data: any, generateOptions: GenerateOptions) {
+  if (generateOptions.services) {
     generateServices(data);
-  } else {
+  } else if (generateOptions.dtos) {
     new DikiyParser().generateDtos(data);
   }
 }
 
-generate('api-docs.json', true, true)
+async function getFileData(path: string, generateFileDataOptions: GenerateFileDataOptions): Promise<any> {
+  let data: any = {};
+  if (generateFileDataOptions === GenerateFileDataOptions.file) {
+    data = getJsonFile(path);
+  } else {
+    data = await createSwaggerRequest(path);
+  }
+  return JSON.parse(data);
+}
+
+async function generate(path: string, generateFileDataOptions: GenerateFileDataOptions, generateOptions: GenerateOptions) {
+  const data = await getFileData(path, generateFileDataOptions);
+  generateJsStructure(data, generateOptions);
+}
+
+generate('http://localhost:8080/v2/api-docs', GenerateFileDataOptions.request, { services: false, dtos: true })
   .then(() => console.log('done'))
   .catch(err => console.error(err));

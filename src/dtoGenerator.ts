@@ -1,38 +1,64 @@
 import { writeFile, readdir } from 'fs';
 import { kebabCase } from 'lodash';
-import { saveFile, TYPES } from './utils';
+import { generateJsdocComment, saveFile, TYPES } from './utils';
+import { IInterfaceBody, IInterfaceParameter } from './ISwagger';
 
 export class DikiyParser {
   generateDtos(data: any) {
     const { definitions } = data;
-    for (const def of Object.values<any>(definitions)) {
+    for (const def of Object.values<IInterfaceBody>(definitions)) {
       const fileName = this.matchDtoName(def.title);
-      const fileData = this.createFileData(def);
-      if(fileName !== null) {
-        this.saveFile(fileName, fileData);
+      if (fileName !== null) {
+        const interfaceString = this.createFileData(def);
+        this.saveFile(fileName, interfaceString);
       }
-     
     }
     this.createIndexFile();
   }
 
-  private createFileData(def: { [k: string]: any }) {
+  private createFileData(def: IInterfaceBody) {
     if (def.properties === undefined) {
-      return '';
+      return `export type ${def.title} = any`;
     }
     const deps: string[] = [];
     const imports: string[] = [];
     const dtoName = this.matchDtoName(def.title);
-    let data = `export interface ${dtoName}  {\n`;
-    Object.entries<any>(def.properties).forEach(([propName, propValue]) => {
-      data += `  ${propName}: ${this.createProp(propValue, deps, imports)}`;
+    if (dtoName === null) {
+      throw new Error('Could not parse DTO');
+    }
+
+    let data = '';
+
+    const interfaceDescription = def?.description;
+    if (interfaceDescription) {
+      data += `${generateJsdocComment(interfaceDescription)}\n`;
+    }
+
+    data += `export interface ${dtoName}  {\n`;
+    Object.entries(def.properties).forEach(([propName, propValue]) => {
+      const propType = this.createProp(propValue, deps, imports, dtoName);
+
+      // for comments
+      const propDescription = propValue?.description;
+      if (propDescription) {
+        data += `${generateJsdocComment(propDescription)}\n`;
+      }
+      // for optional parameter
+      let optionalPropStr = '';
+      if (propValue?.required != null) {
+        optionalPropStr = propValue.required ? '' : '?';
+      } else if (propValue?.allowEmptyValue != null) {
+        optionalPropStr = propValue.allowEmptyValue ? '?' : '';
+      }
+
+      data += `  ${propName}${optionalPropStr}: ${propType}`;
       data += '\n';
     });
     imports.forEach(i => (data = `${i}${data}`));
     return data + '}';
   }
 
-  private createProp(propValue: { [k: string]: any }, deps: string[], imports: string[], ending = ';') {
+  private createProp(propValue: IInterfaceParameter, deps: string[], imports: string[], interfaceName: string, ending = ';') {
     let prop = '';
     const { type } = propValue;
     if (type == TYPES.string) {
@@ -43,17 +69,19 @@ export class DikiyParser {
       prop += `${TYPES.boolean}`;
     } else if (type === TYPES.object) {
       if (propValue.additionalProperties) {
-        prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports)} }`;
+        prop += `{ [k: string]: ${this.createProp(propValue.additionalProperties, deps, imports, interfaceName)} }`;
       } else {
         prop += `{ [k: string]: any }`;
       }
     } else if (type == TYPES.array) {
-      prop += `${this.createProp(propValue.items, deps, imports, '[]')}`;
+      prop += `${this.createProp(propValue.items, deps, imports, interfaceName, '[]')}`;
     } else if (type === undefined && typeof propValue.$ref === 'string') {
       const depDtoName = this.matchDtoName(propValue.$ref);
       if (depDtoName !== null) {
         if (!deps.includes(propValue.$ref)) {
-          imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\n`);
+          if (depDtoName !== interfaceName) {
+            imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\n`);
+          }
           deps.push(propValue.$ref);
         }
         prop += `${depDtoName}`;
@@ -72,9 +100,17 @@ export class DikiyParser {
   }
 
   private matchDtoName(definition: string) {
-    const matches = definition.match(/[^?#\/definitions\/](\w+)/);
+    // const matches = /[^?#/definitions/](.*)/.exec(definition);
+    const matches = /[^?#/definitions/](\w+)/.exec(definition);
     if (matches !== null) {
-      return matches[0].trim();
+
+      const match = matches[0].trim();
+      // const notAcceptablePageDef = /Page«.*»/.exec(match);
+      // const notAcceptableMatchDef = /Map«.*»/.exec(match);
+      // if (notAcceptablePageDef || notAcceptableMatchDef) {
+      //   return null;
+      // }
+      return match;
     } else {
       console.error('Ошибка в партсинге #/definitions', definition);
       return null;
