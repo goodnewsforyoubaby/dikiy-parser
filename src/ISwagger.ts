@@ -1,4 +1,4 @@
-interface IControllerBase {
+export interface IControllerBase {
   type?: string;
   format?: string;
   $ref?: string;
@@ -6,10 +6,11 @@ interface IControllerBase {
   schema?: IControllerSchema;
 }
 
-interface IControllerSchema extends IControllerBase {
+export interface IControllerSchema extends IControllerBase {
   additionalProperties: IControllerBase;
 }
-interface IControllerParameter extends IControllerBase {
+
+export interface IControllerParameter extends IControllerBase {
   name: string;
   in: string;
   description: string;
@@ -22,20 +23,14 @@ interface IControllerParameter extends IControllerBase {
   items?: IControllerItems;
 }
 
-interface IControllerItems extends IControllerBase {
+export interface IControllerItems extends IControllerBase {
   type?: string;
   format?: string;
   enum?: string[];
   $ref: string;
 }
 
-interface IControllerResponse {
-  "200": {
-    schema: IControllerSchema;
-  }
-}
-
-interface IControllerMethod {
+export interface IControllerMethod {
   tags: string[];
   summary: string;
   operationId: string;
@@ -49,7 +44,7 @@ interface IControllerMethod {
   }
 }
 
-interface IInterfaceParameter {
+export interface IInterfaceParameter {
   type: string;
   name?: string;
   in?: string;
@@ -67,21 +62,39 @@ interface IInterfaceParameter {
   maximum?: number;
 }
 
-interface IInterfaceBody {
+export interface IInterfaceBody {
   type: string;
   properties?: { [k: string]: IInterfaceParameter };
   title: string;
   description?: string;
+  allOf?: [string, IInterfaceBody];
 }
 
+export interface ISwaggerTag {
+  name: string;
+  description: string;
+}
 
-export {
-  IControllerSchema,
-  IControllerParameter,
-  IControllerResponse,
-  IControllerMethod,
-  IControllerItems,
-  IControllerBase,
-  IInterfaceParameter,
-  IInterfaceBody,
+export interface ISwaggerInfo {
+  version: string;
+  title: string;
+  contact: {
+    name: string;
+    email: string;
+  },
+  license: any;
+}
+
+export type ISwaggerPaths = { [path: string]: ISwaggerPathRequestTypes };
+export type ISwaggerPathRequestTypes = { [requestType: string]: IControllerMethod };
+export type ISwaggerDefinitions = { [definitionName: string]: IInterfaceBody };
+
+export interface ISwagger {
+  swagger: string;
+  info: ISwaggerInfo;
+  host: string;
+  basePath: string;
+  tags: ISwaggerTag[];
+  paths: ISwaggerPaths;
+  definitions: ISwaggerDefinitions;
 }

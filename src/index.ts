@@ -22,21 +22,21 @@ function generateJsStructure(data: any, generateOptions: GenerateOptions) {
   }
 }
 
-async function getFileData(path: string, generateFileDataOptions: GenerateFileDataOptions): Promise<any> {
-  let data: any = {};
+async function getFileData(path: string, generateFileDataOptions: GenerateFileDataOptions): Promise<string> {
+  let data = '';
   if (generateFileDataOptions === GenerateFileDataOptions.file) {
     data = getJsonFile(path);
   } else {
     data = await createSwaggerRequest(path);
   }
-  return JSON.parse(data);
+  return data;
 }
 
 async function generate(path: string, generateFileDataOptions: GenerateFileDataOptions, generateOptions: GenerateOptions) {
   const data = await getFileData(path, generateFileDataOptions);
-  generateJsStructure(data, generateOptions);
+  generateJsStructure(JSON.parse(data), generateOptions);
 }
 
-generate('http://192.168.2.241:45821/v2/api-docs', GenerateFileDataOptions.request, { services: true, dtos: false })
+generate('http://localhost:8080/v2/api-docs', GenerateFileDataOptions.request, { services: false, dtos: true })
   .then(() => console.log('done'))
   .catch(err => console.error(err));

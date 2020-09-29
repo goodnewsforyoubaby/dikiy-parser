@@ -1,16 +1,23 @@
 import { writeFile, readdir } from 'fs';
 import { kebabCase } from 'lodash';
 import { generateJsdocComment, prettify, saveFile, TYPES } from './utils';
-import { IInterfaceBody, IInterfaceParameter } from './ISwagger';
+import { IInterfaceBody, IInterfaceParameter, ISwagger } from './ISwagger';
+
 
 export class DikiyParser {
-  generateDtos(data: any) {
+  generateDtos(data: ISwagger) {
     const { definitions } = data;
-    for (const def of Object.values<IInterfaceBody>(definitions)) {
-      const fileName = this.matchDtoName(def.title);
+    for (const def of Object.values(definitions)) {
+      // in case of inheritance
+      let definitionBody = def;
+      if (def?.allOf) {
+        definitionBody = def.allOf[1];
+      }
+
+      const fileName = this.matchDtoName(definitionBody.title);
       if (fileName !== null) {
-        const interfaceString = this.createFileData(def);
-        this.saveFile(fileName, interfaceString);
+        const interfaceString = this.createFileData(definitionBody);
+        saveFile(`${kebabCase(fileName)}.d.ts`, 'models', prettify(interfaceString));
       }
     }
     this.createIndexFile();
@@ -98,11 +105,6 @@ export class DikiyParser {
       throw new Error('Ошибка парсинга');
     }
     return prop + ending;
-  }
-
-  private saveFile(dtoName: string, data: string) {
-    const fileName = `${kebabCase(dtoName)}.d.ts`;
-    saveFile(fileName, 'models', prettify(data));
   }
 
   private matchDtoName(definition: string) {
