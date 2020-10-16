@@ -12,7 +12,7 @@ import {
   saveFile,
   SetWrapper,
 } from './utils';
-import { IControllerMethod, IControllerParameter, IControllerSchema } from './ISwagger';
+import { ControllerMethod, ControllerParameter, ControllerSchema } from './Swagger';
 
 // implement HEADER
 class GPart {
@@ -79,7 +79,7 @@ class GServiceClass extends GPart {
     this.imports.add(ImportFrom.http, 'HttpClient')
   }
 
-  addServiceMethod(requestType: string, requestUrl: string, data: IControllerMethod) {
+  addServiceMethod(requestType: string, requestUrl: string, data: ControllerMethod) {
     const gMethod = new GServiceMethod(requestType, requestUrl, data, this.imports);
     this.methods.push(gMethod);
     return gMethod;
@@ -115,7 +115,7 @@ class GServiceMethod extends GPart {
   requestType: string;
   requestUrl: string;
 
-  constructor(requestType: string, requestUrl: string, data: IControllerMethod, imports: Imports) {
+  constructor(requestType: string, requestUrl: string, data: ControllerMethod, imports: Imports) {
     super(data.summary, imports);
     this.requestType = requestType;
     this.requestUrl = requestUrl;
@@ -170,7 +170,7 @@ class GServiceMethod extends GPart {
     return this.httpBody;
   }
 
-  getArguments(data: IControllerMethod) {
+  getArguments(data: ControllerMethod) {
     // there can be multiple formData arguments
     // to prevent duplication of formData
     let formDataExists = false;
@@ -213,7 +213,7 @@ class GServiceMethod extends GPart {
     }
   }
 
-  createReturnType(schema: IControllerSchema | undefined): string {
+  createReturnType(schema: ControllerSchema | undefined): string {
     if (schema) {
       const prop = getPropertyWithMeta(schema);
       if (prop.control.isDto) {
@@ -239,7 +239,7 @@ class GServiceMethod extends GPart {
     return 'void';
   }
 
-  createArgument(parameter: IControllerParameter, control: Prop): IArgument {
+  createArgument(parameter: ControllerParameter, control: Prop): IArgument {
     // for names like 'X-User-Uuid', they are not valid in js
     const camelcaseName = camelCase(parameter.name);
 
@@ -291,7 +291,7 @@ class GServiceMethod extends GPart {
 function generateServices(data: any) {
   const controllerMap = new Map<string, GFile>();
   for (const [url, controllerInside] of Object.entries<any>(data.paths)) {
-    for (const [requestType, requestInside] of Object.entries<IControllerMethod>(controllerInside)) {
+    for (const [requestType, requestInside] of Object.entries<ControllerMethod>(controllerInside)) {
       const name = requestInside.tags[0];
       let file = controllerMap.get(name);
       if (file === undefined) {

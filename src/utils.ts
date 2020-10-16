@@ -1,6 +1,6 @@
 import fs, { existsSync, mkdirSync, writeFile } from 'fs';
 import path from 'path';
-import { IControllerBase, IControllerSchema } from 'ISwagger';
+import { ControllerBase, ControllerSchema } from 'Swagger';
 import { get } from 'http';
 import prettier from 'prettier';
 
@@ -140,11 +140,11 @@ interface PropControl {
   isArray: boolean;
 }
 
-function getPropertyWithMeta(value: IControllerBase): Prop {
+function getPropertyWithMeta(value: ControllerBase): Prop {
   return getProp(value, { isDto: false, isPageable: false, isArray: false });
 }
 
-function getProp(value: IControllerBase, control: PropControl): Prop {
+function getProp(value: ControllerBase, control: PropControl): Prop {
   let type = '';
   let importType = '';
 
@@ -172,7 +172,7 @@ function getProp(value: IControllerBase, control: PropControl): Prop {
         break;
       case TYPES.object: {
         // only schema can have additional properties
-        const additionalProperties = (value as IControllerSchema)?.additionalProperties;
+        const additionalProperties = (value as ControllerSchema)?.additionalProperties;
 
         if (additionalProperties) {
           const prop = getProp(additionalProperties, control);

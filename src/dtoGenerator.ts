@@ -1,11 +1,11 @@
 import { writeFile, readdir } from 'fs';
 import { kebabCase } from 'lodash';
 import { generateJsdocComment, prettify, saveFile, TYPES } from './utils';
-import { IInterfaceBody, IInterfaceParameter, ISwagger } from './ISwagger';
+import { SwaggerDefinition, SwaggerDefinitionProperty, Swagger } from './Swagger';
 
 
 export class DikiyParser {
-  generateDtos(data: ISwagger) {
+  generateDtos(data: Swagger) {
     const { definitions } = data;
     for (const def of Object.values(definitions)) {
       // in case of inheritance
@@ -23,7 +23,7 @@ export class DikiyParser {
     this.createIndexFile();
   }
 
-  private createFileData(def: IInterfaceBody) {
+  private createFileData(def: SwaggerDefinition) {
     if (def.properties === undefined) {
       return `export type ${def.title} = any`;
     }
@@ -64,7 +64,7 @@ export class DikiyParser {
     return data + '}';
   }
 
-  private createProp(propValue: IInterfaceParameter, deps: string[], imports: string[], interfaceName: string, ending = ';') {
+  private createProp(propValue: SwaggerDefinitionProperty, deps: string[], imports: string[], interfaceName: string, ending = ';') {
     let prop = '';
     const { type } = propValue;
     if (type == TYPES.string) {
@@ -113,6 +113,11 @@ export class DikiyParser {
     if (matches !== null) {
 
       const match = matches[0].trim();
+      // console.log(match);
+      // if (/.*«.*»/.exec(match)) {
+      //   console.log(`Found unacceptable DTO: ${match}`);
+      //   return null;
+      // }
       // const notAcceptable = ['Page', 'Map', 'PaginationResponse']
       // notAcceptable.forEach(v => {
       //   if (new RegExp(`${v}«.*»`).exec(match)) {
