@@ -76,11 +76,6 @@ class SetWrapper<T> {
   }
 }
 
-function getJsonFile(filePath: string): string {
-  const p = path.join(__dirname, filePath);
-  return fs.readFileSync(p, 'utf8');
-}
-
 interface Dto {
   types: string[];
   pageable: boolean;
@@ -238,7 +233,12 @@ function saveFile(fileName: string, folder: string, data: string): void {
   });
 }
 
-function createSwaggerRequest(swaggerURL: string): Promise<string> {
+function getFile(filePath: string): Promise<string> {
+  const p = path.join(__dirname, filePath);
+  return fs.promises.readFile(p, { encoding: 'utf8' });
+}
+
+function requestFile(swaggerURL: string): Promise<string> {
   console.log(`Making request to: ${swaggerURL}`);
   return new Promise((resolve, reject) => {
     get(swaggerURL, res => {
@@ -272,7 +272,7 @@ export {
   Imports,
   ImportFrom,
   SetWrapper,
-  getJsonFile,
+  getFile,
   matchDto,
   getProp,
   TYPES,
@@ -282,7 +282,7 @@ export {
   createStringLiteralFromUrl,
   IArgument,
   saveFile,
-  createSwaggerRequest,
+  requestFile,
   prettify,
   getPropertyWithMeta,
   generateJsdocComment,

@@ -1,7 +1,7 @@
 import path from 'path';
 import { camelCase, upperFirst } from 'lodash';
 import {
-  createStringLiteralFromUrl,
+  createStringLiteralFromUrl, generateJsdocComment,
   getFirstMatch,
   getPropertyWithMeta,
   IArgument,
@@ -115,8 +115,13 @@ class GServiceMethod extends GPart {
   requestType: string;
   requestUrl: string;
 
+  comment = '';
+
   constructor(requestType: string, requestUrl: string, data: ControllerMethod, imports: Imports) {
     super(data.summary, imports);
+    if (data.summary && /[а-яА-ЯЁё]/.test(data.summary)) {
+      this.comment = generateJsdocComment(data.summary);
+    }
     this.requestType = requestType;
     this.requestUrl = requestUrl;
 
@@ -154,8 +159,10 @@ class GServiceMethod extends GPart {
     this.insideLines.push(`return this.http.${this.requestType}<${this.returnType}>(url${httpBodyStr}${optionsStr})`);
 
     const insideLinesStr = this.insideLines.join('\n');
+    const commentary = this.name;
 
     return `
+      ${this.comment}
       ${this.name}(${argumentsStr}): Observable<${this.returnType}> {
         ${insideLinesStr}}
       `;
