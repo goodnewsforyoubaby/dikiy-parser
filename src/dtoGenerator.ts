@@ -15,137 +15,136 @@ export class DikiyParser {
     this.settings = settings;
   }
 
-  generateDtos(data: Swagger) {
+  getDefinition(definition: SwaggerDefinition): SwaggerDefinition {
+    if (definition?.allOf) {
+      return definition.allOf[1];
+    }
+    return definition;
+  }
+
+  generateDtos(data: Swagger): void {
     const { definitions } = data;
     for (const def of Object.values(definitions)) {
-      // in case of inheritance
-      let definitionBody = def;
-      if (def?.allOf) {
-        definitionBody = def.allOf[1];
-      }
+      const definition = this.getDefinition(def);
 
-      const fileName = this.matchDtoName(definitionBody.title);
-      if (fileName !== null) {
-        const interfaceString = this.createFileData(definitionBody);
-        if (interfaceString) {
-          saveFile(`${kebabCase(fileName)}.d.ts`, 'models', prettify(interfaceString));
-        }
+      try {
+        const fileName = this.matchDtoName(definition.title);
+        const interfaceString = this.createFileData(definition);
+        saveFile(`${kebabCase(fileName)}.d.ts`, 'models', prettify(interfaceString));
+      } catch (e) {
+        console.log((e as Error).message);
       }
     }
     this.createIndexFile();
   }
 
-  private createFileData(def: SwaggerDefinition): string | null {
+  createComment(comment: string | undefined): string {
+    if (comment && this.settings.enableComments) {
+      return `${generateJsdocComment(comment)}\n`;
+    }
+    return '';
+  }
+
+  isPropertyOptional(prop: SwaggerDefinitionProperty): boolean {
+    if (prop?.required != null) {
+      return !prop.required;
+    } else if (prop?.allowEmptyValue != null) {
+      return prop.allowEmptyValue;
+    }
+    return false;
+  }
+
+  private createFileData(def: SwaggerDefinition): string {
     if (def.properties === undefined) {
       return `export type ${def.title} = any`;
     }
-    const deps: string[] = [];
-    const imports: string[] = [];
     const dtoName = this.matchDtoName(def.title);
-    if (dtoName === null) {
-      return null;
-    }
 
     let data = '';
+    data += this.createComment(def?.description);
 
-    const interfaceDescription = def?.description;
-    if (this.settings.enableComments && interfaceDescription) {
-      data += `${generateJsdocComment(interfaceDescription)}\n`;
-    }
+    const dependencies = new Set<string>();
+    data += this.createInterface(def, dtoName, dependencies);
+    data = this.getImports(dependencies, dtoName) + data;
 
-    data += `export interface ${dtoName}  {\n`;
-    Object.entries(def.properties).forEach(([propName, propValue]) => {
-      const propType = this.createProp(propValue, deps, imports, dtoName);
-      if (propType === null) {
-        return propType;
-      }
-
-      // for comments
-      const propDescription = propValue?.description;
-      if (this.settings.enableComments && propDescription) {
-        data += `${generateJsdocComment(propDescription)}\n`;
-      }
-
-      // for optional parameter
-      let optionalPropStr = '';
-      if (propValue?.required != null) {
-        optionalPropStr = propValue.required ? '' : '?';
-        if (!propValue.required) {
-          console.log(propValue.required);
-        }
-      } else if (propValue?.allowEmptyValue != null) {
-        optionalPropStr = propValue.allowEmptyValue ? '?' : '';
-      }
-
-      data += `  ${propName}${optionalPropStr}: ${propType}`;
-      data += '\n';
-    });
-    imports.forEach(i => (data = `${i}${data}`));
-    return data + '}';
+    return data;
   }
 
-  private createProp(propValue: SwaggerDefinitionProperty, deps: string[], imports: string[], interfaceName: string, ending = ';'): string | null {
+  createInterface(definition: SwaggerDefinition, interfaceName: string, dependencies: Set<string>) {
+    let interfaceStr = '';
+    if (definition.properties === undefined) {
+      return '';
+    }
+
+    interfaceStr += `export interface ${interfaceName}  {\n`;
+    Object.entries(definition.properties).forEach(([propName, propValue]) => {
+      interfaceStr += this.createComment(propValue?.description);
+
+      const propType = this.createProp(propValue, dependencies);
+      const optionalPropStr = this.isPropertyOptional(propValue) ? '?' : '';
+      interfaceStr += `${propName}${optionalPropStr}: ${propType}\n`;
+    });
+    interfaceStr += '}';
+    return interfaceStr;
+  }
+
+  getImports(dtoDependencies: Set<string>, interfaceName: string): string {
+    let imports = '';
+    dtoDependencies.forEach(dep => {
+      if (dep !== interfaceName) {
+        imports += `import { ${dep} } from "./${kebabCase(dep)}";\n`;
+      }
+    })
+    return imports;
+  }
+
+  createEnum(definition: SwaggerDefinitionProperty): string {
+    if (definition?.enum && this.settings.detailedEnum) {
+      const enums = definition.enum.map(e => `'${e}'`).join(' | ');
+      return `(${enums})`
+    } else {
+      return `${TYPES.string}`;
+    }
+  }
+
+  private createProp(propValue: SwaggerDefinitionProperty, dependencies: Set<string>, ending = ';'): string {
     let prop = '';
     const { type } = propValue;
     if (type == TYPES.string) {
-      // for enum
-      if (propValue?.enum && this.settings.detailedEnum) {
-        const enums = propValue.enum.map(e => `'${e}'`).join(' | ');
-        prop += `(${enums})`
-      } else {
-        prop += `${TYPES.string}`;
-      }
+      prop += this.createEnum(propValue);
     } else if (type === TYPES.integer || type === TYPES.number) {
       prop += `${TYPES.number}`;
     } else if (type === TYPES.boolean) {
       prop += `${TYPES.boolean}`;
     } else if (type === TYPES.object) {
       if (propValue.additionalProperties) {
-        const objectProp = this.createProp(propValue.additionalProperties, deps, imports, interfaceName);
-        if (objectProp === null) {
-          return null;
-        }
+        const objectProp = this.createProp(propValue.additionalProperties, dependencies);
         prop += `{ [k: string]: ${objectProp} }`;
       } else {
         prop += `{ [k: string]: any }`;
       }
     } else if (type == TYPES.array) {
-      const arrayProp = this.createProp(propValue.items, deps, imports, interfaceName, '[]');
-      if (arrayProp === null) {
-        return null;
-      }
-      prop += `${arrayProp}`;
+      prop += this.createProp(propValue.items, dependencies, '[]');
     } else if (type === undefined && typeof propValue.$ref === 'string') {
       const depDtoName = this.matchDtoName(propValue.$ref);
-      if (depDtoName !== null) {
-        if (!deps.includes(propValue.$ref)) {
-          if (depDtoName !== interfaceName) {
-            imports.push(`import { ${depDtoName} } from "./${kebabCase(depDtoName)}";\n`);
-          }
-          deps.push(propValue.$ref);
-        }
-        prop += `${depDtoName}`;
-      } else {
-        return null;
-      }
+      dependencies.add(depDtoName);
+      prop += `${depDtoName}`;
     } else {
       throw new Error('Ошибка парсинга');
     }
     return prop + ending;
   }
 
-  private matchDtoName(definition: string) {
+  private matchDtoName(definition: string): string {
     const matches = /[^?#/definitions/](.*)/.exec(definition);
     if (matches !== null) {
       const match = matches[0].trim();
       if (/.*«.*»/.exec(match)) {
-        console.log(`Found unacceptable DTO: ${match}`);
-        return null;
+        throw new Error(`Found unacceptable DTO: ${match}`);
       }
       return match;
     } else {
-      console.error('Ошибка в партсинге #/definitions', definition);
-      return null;
+      throw new Error(`Ошибка в партсинге #/definitions: ${definition}`);
     }
   }
 
